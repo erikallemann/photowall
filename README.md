@@ -85,7 +85,6 @@ journalctl --user -u photowall -f
 
 ## Next steps
 
-- Choose a license (`LICENSE` file) before publishing.
 - Add CI (lint/test) if you expect contributions.
 - Configure Dependabot or Renovate to track dependency updates once the repo is on GitHub.
 
