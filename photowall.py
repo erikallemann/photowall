@@ -175,9 +175,9 @@ def _get_taken_ms_cached(p: Path) -> Optional[int]:
     return taken
 
 # ---------- HTML ----------
-UPLOAD_ONLY_HTML = """<!doctype html>
-<html lang=\"sv\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-<title>Ladda upp</title>
+UPLOAD_DISABLED_HTML = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Upload Photos</title>
 <style>
   body{margin:0;background:#0b0c10;color:#f5f7fb;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
   main{max-width:720px;margin:40px auto;padding:0 16px}
@@ -191,26 +191,122 @@ UPLOAD_ONLY_HTML = """<!doctype html>
 <body>
 <main>
   <header>
-    <h1>Fotovägg</h1>
-    <nav><a href=\"/wall\">Vägg</a></nav>
+    <h1>Photowall</h1>
+    <nav><a href="/wall">Wall</a></nav>
   </header>
-  <div class=\"note\">
-    <strong>Uppladdning är stängd.</strong>
-    <p>Du kan fortfarande titta på fotoväggen och ladda ner alla bilder som en ZIP-fil.</p>
-    <div class=\"actions\">
-      <a class=\"btn\" href=\"/wall\">Öppna fotoväggen</a>
-      <a class=\"btn\" href=\"/slideshow\">Starta bildspel</a>
-      <a class=\"btn\" href=\"/download\">Ladda ner ZIP</a>
+  <div class="note">
+    <strong>Uploads are closed.</strong>
+    <p>You can still view the wall and download all photos as a ZIP archive.</p>
+    <div class="actions">
+      <a class="btn" href="/wall">Open the photo wall</a>
+      <a class="btn" href="/slideshow">Start slideshow</a>
+      <a class="btn" href="/download">Download ZIP</a>
     </div>
   </div>
 </main>
 </body></html>
 """
 
+UPLOAD_FORM_HTML = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Upload Photos</title>
+<style>
+  body{margin:0;background:#0b0c10;color:#f5f7fb;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  main{max-width:720px;margin:32px auto;padding:0 16px}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px}
+  h1{margin:0}
+  a{color:#8ab4ff}
+  form{background:#0f1219;border:1px solid #27304a;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:16px}
+  label{display:flex;flex-direction:column;gap:6px;color:#c7d0e8;font-size:14px}
+  input[type=file]{color:#f5f7fb}
+  input,textarea,button{background:#161922;border:1px solid #242837;color:#f5f7fb;padding:10px 12px;border-radius:12px;font:inherit}
+  button{cursor:pointer;align-self:flex-start}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .muted{color:#9aa3b2;font-size:14px}
+  #status{margin-top:8px;font-size:14px;min-height:18px}
+  #status.error{color:#ff8a80}
+  #status.ok{color:#8ab4ff}
+</style></head>
+<body>
+<main>
+  <header>
+    <h1>Photowall</h1>
+    <nav class="actions">
+      <a class="muted" href="/wall">Wall</a>
+      <a class="muted" href="/slideshow">Slideshow</a>
+      <a class="muted" href="/download">Download ZIP</a>
+    </nav>
+  </header>
+  <form id="uploadForm">
+    <p class="muted">Choose a photo, add an optional caption, and enter the upload PIN if required. Max 10&nbsp;MB. Accepted formats: JPG/PNG/GIF/WebP.</p>
+    <label>Photo
+      <input id="file" name="file" type="file" accept="image/*" required>
+    </label>
+    <label>Caption (optional, 40 characters)
+      <input id="caption" name="caption" maxlength="40" placeholder="e.g. Couple on stage">
+    </label>
+    <label>PIN (if required)
+      <input id="pin" maxlength="64" autocomplete="off" placeholder="Enter upload PIN">
+    </label>
+    <button type="submit">Upload</button>
+    <div id="status"></div>
+  </form>
+</main>
+<script>
+const form = document.getElementById('uploadForm');
+const fileInput = document.getElementById('file');
+const captionInput = document.getElementById('caption');
+const pinInput = document.getElementById('pin');
+const statusEl = document.getElementById('status');
+
+function setStatus(text, cls){
+  statusEl.textContent = text;
+  statusEl.className = cls || '';
+}
+
+form.addEventListener('submit', async (ev)=>{
+  ev.preventDefault();
+  const file = fileInput.files[0];
+  if(!file){
+    setStatus('Select a photo first.', 'error');
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', file);
+  const caption = captionInput.value.trim();
+  if(caption) fd.append('caption', caption);
+
+  const headers = {};
+  const pin = pinInput.value.trim();
+  if(pin) headers['X-Upload-Pin'] = pin;
+
+  setStatus('Uploading...', '');
+  try{
+    const res = await fetch('/upload', {method:'POST', body: fd, headers});
+    if(res.status === 201){
+      setStatus('Upload successful!', 'ok');
+      form.reset();
+    } else if(res.status === 403){
+      setStatus('Incorrect PIN or uploads disabled.', 'error');
+    } else if(res.status === 413){
+      setStatus('File is too large (max 10 MB).', 'error');
+    } else {
+      setStatus('Upload failed ('+res.status+').', 'error');
+    }
+  } catch(err){
+    setStatus('Network error, please try again.', 'error');
+  }
+});
+</script>
+</body></html>
+"""
+
+
+
 WALL_HTML = """<!doctype html>
-<html lang=\"sv\"><head><meta charset=\"utf-8\">
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-<title>Fotovägg</title>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Photo Wall</title>
 <style>
   html, body { overflow-x: clip; }
   :root{--gap:12px; --bg:#0b0c10; --fg:#f5f7fb; --muted:#9aa3b2}
@@ -246,44 +342,44 @@ WALL_HTML = """<!doctype html>
 <body>
 <header>
   <div>
-    <h1>Fotovägg</h1>
-    <div class=\"muted\">Välj sortering och layout. Uppdateras automatiskt.</div>
+    <h1>Photo Wall</h1>
+    <div class="muted">Choose sorting and layout. Updates automatically.</div>
   </div>
-  <div style=\"display:flex;gap:8px;align-items:center;flex-wrap:wrap\">
-    <a href=\"/\" style=\"margin-right:8px\" class=\"muted\">Hem</a>
-    <label class=\"muted\" for=\"sort\">Sortering</label>
-    <select id=\"sort\">
-      <option value=\"upload\">Uppladdad</option>
-      <option value=\"taken\">Tagen (EXIF/IPTC)</option>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <a href="/" style="margin-right:8px" class="muted">Home</a>
+    <label class="muted" for="sort">Sort by</label>
+    <select id="sort">
+      <option value="upload">Uploaded</option>
+      <option value="taken">Taken (EXIF/IPTC)</option>
     </select>
-    <label class=\"muted\" for=\"order\">Ordning</label>
-    <select id=\"order\">
-      <option value=\"desc\">Fallande</option>
-      <option value=\"asc\">Stigande</option>
+    <label class="muted" for="order">Order</label>
+    <select id="order">
+      <option value="desc">Descending</option>
+      <option value="asc">Ascending</option>
     </select>
-    <label class=\"muted\" for=\"layout\">Layout</label>
-    <select id=\"layout\">
-      <option value=\"columns\">Kolumner</option>
-      <option value=\"rows\">Raster (vertikal grid)</option>
+    <label class="muted" for="layout">Layout</label>
+    <select id="layout">
+      <option value="columns">Columns</option>
+      <option value="rows">Rows (grid)</option>
     </select>
-    <label class=\"chk\"><input type=\"checkbox\" id=\"uniform\"> Jämna rutor</label>
-    <a class=\"muted\" href=\"/download\" title=\"Ladda ner alla bilder som ZIP\">Ladda ner ZIP</a>
-    <button id=\"scrollL\" title=\"Upp\">▲</button>
-    <button id=\"scrollR\" title=\"Ner\">▼</button>
-    <button id=\"refresh\">Uppdatera</button>
-    <button id=\"toggle\">Auto: På</button>
+    <label class="chk"><input type="checkbox" id="uniform"> Uniform tiles</label>
+    <a class="muted" href="/download" title="Download all photos as a ZIP archive">Download ZIP</a>
+    <button id="scrollL" title="Scroll up">▲</button>
+    <button id="scrollR" title="Scroll down">▼</button>
+    <button id="refresh">Refresh</button>
+    <button id="toggle">Auto: On</button>
   </div>
 </header>
 <main>
-  <div id=\"grid\" class=\"container columns\" aria-live=\"polite\"></div>
-  <p id=\"status\" class=\"muted\"></p>
+  <div id="grid" class="container columns" aria-live="polite"></div>
+  <p id="status" class="muted"></p>
 </main>
-<div id=\"viewer\" class=\"viewer\" aria-hidden=\"true\">
-  <div class=\"vnav vprev\" id=\"vprev\" title=\"Föregående\"></div>
-  <img id=\"vimg\" alt=\"\">
-  <div class=\"vnav vnext\" id=\"vnext\" title=\"Nästa\"></div>
-  <button class=\"vclose\" id=\"vclose\" title=\"Stäng\">×</button>
-  <div class=\"vhud\"><div id=\"vcap\"></div><div id=\"vcount\"></div></div>
+<div id="viewer" class="viewer" aria-hidden="true">
+  <div class="vnav vprev" id="vprev" title="Previous"></div>
+  <img id="vimg" alt="">
+  <div class="vnav vnext" id="vnext" title="Next"></div>
+  <button class="vclose" id="vclose" title="Close">×</button>
+  <div class="vhud"><div id="vcap"></div><div id="vcount"></div></div>
 </div>
 <script>
 const P = new URLSearchParams(location.search);
@@ -349,30 +445,29 @@ async function fetchList(){
 
 function render(){
   grid.innerHTML = '';
-  const labelMap = {upload:'Uppladdad', taken:'Tagen'};
-  const label = labelMap[sort] || 'Tid';
+  const labelMap = {upload:'Uploaded', taken:'Taken'};
+  const label = labelMap[sort] || 'Time';
 
   items.forEach((it,i)=>{
     const card = document.createElement('article'); card.className = 'card';
     const img  = document.createElement('img'); img.loading='lazy'; img.decoding='async'; img.alt=it.name; img.src=it.url+'?v='+it.ts;
     const meta = document.createElement('div'); meta.className='meta';
-    const ts   = document.createElement('div'); ts.className='pill';
-    const tval = (sort==='taken' ? (it.tk||it.ts) : it.ts);
-    ts.textContent = `${label}: ` + new Date(tval).toLocaleString();
+    const ts   = new Date((sort==='taken' ? (it.tk||it.ts) : it.ts)).toLocaleString();
+    const stamp = document.createElement('div'); stamp.className='pill'; stamp.textContent = `${label}: ` + ts;
     const cap  = document.createElement('div'); cap.className='muted'; cap.textContent = it.cap || '';
-    meta.append(ts,cap); card.append(img,meta);
+    meta.append(stamp,cap); card.append(img,meta);
     img.addEventListener('click',()=> openViewer(i));
     grid.append(card);
   });
-  setStatus(`Visar ${items.length} bild(er)`);
+  setStatus(`Showing ${items.length} photo(s)`);
 }
 
-async function load(){ try { items = await fetchList(); render(); } catch(e){ setStatus('Fel vid laddning'); } }
+async function load(){ try { items = await fetchList(); render(); } catch(e){ setStatus('Failed to load photos'); } }
 
 document.getElementById('refresh').onclick = load;
 document.getElementById('toggle').onclick  = ()=>{
   auto = !auto;
-  document.getElementById('toggle').textContent = 'Auto: ' + (auto ? 'På' : 'Av');
+  document.getElementById('toggle').textContent = 'Auto: ' + (auto ? 'On' : 'Off');
   if (auto) tick(); else clearInterval(timer);
 };
 function tick(){ clearInterval(timer); timer = setInterval(load, 15000); }
@@ -447,9 +542,11 @@ viewer.addEventListener('touchend', ()=>{
 </body></html>
 """
 
+
+
 SLIDESHOW_HTML = """<!doctype html>
-<html lang=\"sv\"><head><meta charset=\"utf-8\">
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Slideshow</title>
 <style>
   html,body{height:100%;margin:0;background:#000;color:#fff;font:16px/1.4 system-ui,-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif}
@@ -463,12 +560,12 @@ SLIDESHOW_HTML = """<!doctype html>
 </style>
 </head>
 <body>
-<div id=\"wrap\">
-  <img id=\"slide\" alt=\"\">
-  <div id=\"hint\" class=\"hidden\">Blanksteg start/paus. Piltangenter. F helskärm. R ladda om. S blanda. +/− hastighet.</div>
-  <div id=\"hud\">
-    <div><strong>Fotovägg</strong> <span id=\"time\" class=\"muted\"></span></div>
-    <div class=\"muted\"><span id=\"count\">0/0</span> • <span id=\"speed\"></span>s</div>
+<div id="wrap">
+  <img id="slide" alt="">
+  <div id="hint" class="hidden">Space: play/pause. Arrow keys navigate. F fullscreen. R reload. S shuffle. +/- speed.</div>
+  <div id="hud">
+    <div><strong>Photowall</strong> <span id="time" class="muted"></span></div>
+    <div class="muted"><span id="count">0/0</span> • <span id="speed"></span>s</div>
   </div>
 </div>
 <script>
@@ -517,7 +614,7 @@ async function refreshList(){
     const newly = incoming.filter(it=>!have.has(it.name));
     if (newly.length){
       if (!shuffle){ items = incoming.slice(); show(0); }
-      else { const insertAt = Math.min(items.length, Math.max(0, idx+1)); items.splice(insertAt, 0, *newly.sort(()=>Math.random()-0.5)); }
+      else { const insertAt = Math.min(items.length, Math.max(0, idx+1)); items.splice(insertAt, 0, ...newly.sort(()=>Math.random()-0.5)); }
     } else { renderHUD(); }
   }catch(e){ }
   finally{ loading = false; }
@@ -548,9 +645,11 @@ document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) refres
 </body></html>
 """
 
+
+
 ADMIN_HTML = """<!doctype html>
-<html lang=\"sv\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-<title>Admin Fotovägg</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin Photowall</title>
 <style>
   :root{--gap:12px; --bg:#0b0c10; --fg:#f5f7fb; --muted:#9aa3b2}
   *{box-sizing:border-box} body{margin:0;background:#0b0c10;color:#f5f7fb;font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
@@ -563,25 +662,25 @@ ADMIN_HTML = """<!doctype html>
   .meta{padding:8px 10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
   .pill{font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid #27304a;color:#c7d0e8}
   .del{position:absolute;top:8px;right:8px;background:#c62828;color:#fff;border:none;border-radius:10px;padding:4px 6px;cursor:pointer}
-  input,button{background:#161922;border:1px solid #242837;color:#var(--fg);padding:8px 10px;border-radius:10px}
+  input,button{background:#161922;border:1px solid #242837;color:var(--fg);padding:8px 10px;border-radius:10px}
   .muted{color:var(--muted)}
   a{color:#8ab4ff}
 </style></head>
 <body>
 <header>
   <h1>Admin</h1>
-  <div style=\"display:flex;gap:8px;align-items:center\">
-    <a href=\"/\" class=\"muted\">Hem</a>
-    <a href=\"/wall\" class=\"muted\">Vägg</a>
-    <input id=\"pin\" placeholder=\"Admin PIN\" type=\"password\" style=\"min-width:180px\">
-    <button id=\"save\">Spara</button>
-    <button id=\"refresh\">Uppdatera</button>
-    <button id=\"toggle\">Auto: På</button>
+  <div style="display:flex;gap:8px;align-items:center">
+    <a href="/" class="muted">Home</a>
+    <a href="/wall" class="muted">Wall</a>
+    <input id="pin" placeholder="Admin PIN" type="password" style="min-width:180px">
+    <button id="save">Save</button>
+    <button id="refresh">Refresh</button>
+    <button id="toggle">Auto: On</button>
   </div>
 </header>
 <main>
-  <div id=\"grid\" class=\"grid\"></div>
-  <p id=\"status\" class=\"muted\"></p>
+  <div id="grid" class="grid"></div>
+  <p id="status" class="muted"></p>
 </main>
 <script>
 const grid=document.getElementById('grid'), statusEl=document.getElementById('status');
@@ -591,7 +690,7 @@ pinEl.value = admin.pin;
 
 document.getElementById('save').onclick = ()=>{ admin.pin=pinEl.value||''; localStorage.setItem('pw_admin_pin', admin.pin); };
 document.getElementById('refresh').onclick = load;
-document.getElementById('toggle').onclick = ()=>{ auto=!auto; document.getElementById('toggle').textContent='Auto: '+(auto?'På':'Av'); if(auto) tick(); else clearInterval(timer); };
+document.getElementById('toggle').onclick = ()=>{ auto=!auto; document.getElementById('toggle').textContent='Auto: '+(auto?'On':'Off'); if(auto) tick(); else clearInterval(timer); };
 
 function setStatus(t){ statusEl.textContent=t; }
 
@@ -602,14 +701,14 @@ async function fetchList(){
 }
 
 async function doDelete(name,card){
-  if(!admin.pin){ alert('Ange Admin PIN först'); return; }
+  if(!admin.pin){ alert('Enter the admin PIN first'); return; }
   const r = await fetch('/delete',{method:'POST',
     headers:{'Content-Type':'application/json','X-Admin-Pin': admin.pin},
     body: JSON.stringify({name})
   });
-  if(r.status===204){ card.remove(); known.delete(name); setStatus('Raderade '+name); }
-  else if(r.status===403){ alert('Fel PIN'); }
-  else { alert('Borttagning misslyckades'); }
+  if(r.status===204){ card.remove(); known.delete(name); setStatus('Deleted '+name); }
+  else if(r.status===403){ alert('Incorrect PIN'); }
+  else { alert('Delete failed'); }
 }
 
 function render(items){
@@ -617,7 +716,7 @@ function render(items){
   for(const it of items){
     if(known.has(it.name)) continue;
     const card=document.createElement('article'); card.className='card';
-    const btn=document.createElement('button'); btn.className='del'; btn.textContent='×'; btn.title='Radera';
+    const btn=document.createElement('button'); btn.className='del'; btn.textContent='×'; btn.title='Delete';
     btn.onclick=()=> doDelete(it.name, card);
     const img=document.createElement('img'); img.loading='lazy'; img.decoding='async'; img.alt=it.name; img.src=it.url+'?v='+it.ts;
     const meta=document.createElement('div'); meta.className='meta';
@@ -627,19 +726,22 @@ function render(items){
     known.add(it.name); added++;
   }
   if(added) grid.prepend(frag);
-  setStatus('Visar '+known.size+' bild(er)');
+  setStatus('Displaying '+known.size+' photo(s)');
 }
-async function load(){ try{ const items=await fetchList(); render(items); }catch(e){ setStatus('Fel vid laddning'); } }
+async function load(){ try{ const items=await fetchList(); render(items); }catch(e){ setStatus('Failed to load photos'); } }
 function tick(){ clearInterval(timer); timer=setInterval(load,15000); }
 load(); tick();
 </script>
 </body></html>
 """
 
+
+
 # ---------- Routes ----------
 @app.get("/")
 def root():
-    return Response(UPLOAD_ONLY_HTML, mimetype="text/html")
+    html = UPLOAD_FORM_HTML if ALLOW_UPLOAD else UPLOAD_DISABLED_HTML
+    return Response(html, mimetype="text/html")
 
 @app.get("/wall")
 def wall():
@@ -706,16 +808,16 @@ def list_files():
 def upload():
     # Uploads disabled hard unless ALLOW_UPLOAD is set
     if not ALLOW_UPLOAD:
-        return ("Uppladdning är stängd", 403)
+        return ("Uploads are disabled", 403)
     if UPLOAD_PIN and request.headers.get("x-upload-pin","") != UPLOAD_PIN:
         return ("Forbidden", 403)
     f = request.files.get("file")
-    if not f: return ("Ingen fil", 400)
+    if not f: return ("No file provided", 400)
     f.stream.seek(0, os.SEEK_END)
     size = f.stream.tell()
     f.stream.seek(0)
     if size > MAX_BYTES:
-        return ("För stor fil", 413)
+        return ("File too large", 413)
     safe = _safe_name(f.filename or "upload.jpg")
     caption = (request.form.get("caption") or "").strip()
     caption = _slug_re.sub("_", caption)[:40]
