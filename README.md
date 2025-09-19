@@ -89,3 +89,6 @@ journalctl --user -u photowall -f
 - Add CI (lint/test) if you expect contributions.
 - Configure Dependabot or Renovate to track dependency updates once the repo is on GitHub.
 
+## License
+
+Released under the MIT License. See `LICENSE` for details.
