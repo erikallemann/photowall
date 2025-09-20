@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-The Flask application lives in `photowall.py`; templates and static assets are embedded as multi-line strings, so code changes happen there. Runtime uploads land in `uploads/` (kept empty in git). Deployment helpers sit under `deploy/` (`systemd/` unit + env example, `caddy/` reverse-proxy sample). Reference notes for agents live in `docs/photowall-notes.md`. Add new modules beside `photowall.py` only if the file becomes unwieldy, and wire them in with explicit imports.
+The Flask application lives in `photowall.py`; templates and static assets are embedded as multi-line strings, so code changes happen there. Runtime uploads land in `uploads/` (kept empty in git). Deployment helpers sit under `deploy/` (`systemd/` unit + env example, `caddy/` reverse-proxy sample). Reference notes for agents live in `docs/photowall-notes.md`.
 
 ## Build, Test, and Development Commands
 Create a virtual environment and install dependencies:
@@ -10,7 +10,7 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
 ```
-Run the dev server with `flask run --host=0.0.0.0 --port=${PORT:-8081}` after exporting `FLASK_APP=photowall:app`. For production parity, launch via `gunicorn -w 4 -b 127.0.0.1:8081 'photowall:app'`. Use `FLASK_DEBUG=1` only for local work; never commit with it enabled.
+Run the dev server with `flask run --host=0.0.0.0 --port=${PORT:-8081}` after exporting `FLASK_APP=photowall:app`. For production parity, launch via `gunicorn -w 4 -b 127.0.0.1:8081 'photowall:app'`.
 
 ## Coding Style & Naming Conventions
 Match the existing PEP 8-ish style: 4-space indentation, snake_case for functions and variables, UPPER_SNAKE for constants, and early returns instead of deep nesting. Inline HTML/CSS/JS blocks in strings should stay readable—keep line length under ~100 characters and favor f-strings over concatenation. Preserve the `_safe_name` filename pattern when touching upload logic.
@@ -23,3 +23,12 @@ Commits follow short imperative subjects (see `git log`: “Add MIT license”, 
 
 ## Security & Configuration Tips
 Secrets live in environment variables (`ADMIN_PIN`, `UPLOAD_PIN`, `ALLOW_UPLOAD`). Never hardcode pins or sample values in commits. Document new config flags in both `README.md` and `deploy/systemd/photowall.env.example`, and remind operators to restart the user-level systemd service after changes.
+
+## Production Sync & Restart Workflow
+The live service reads from the git checkout via the `/home/erik/partywall` → `~/git/photowall` symlink. Deploy updates with:
+```bash
+cd ~/git/photowall
+git pull
+systemctl --user restart partywall
+```
+If the pull adds dependencies, run `/home/erik/partywall/venv/bin/pip install -r requirements.txt` before the restart. Validate the rollout with `systemctl --user status partywall` or `journalctl --user -u partywall -n40`.
