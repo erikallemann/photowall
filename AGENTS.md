@@ -1,34 +1,55 @@
-# Repository Guidelines
+# Photowall – AGENTS.md
 
-## Project Structure & Module Organization
-The Flask application lives in `photowall.py`; templates and static assets are embedded as multi-line strings, so code changes happen there. Runtime uploads land in `uploads/` (kept empty in git). Deployment helpers sit under `deploy/` (`systemd/` unit + env example, `caddy/` reverse-proxy sample). Reference notes for agents live in `docs/photowall-notes.md`.
+Purpose: capture the project’s vibe-coded rules so contributors and AI agents keep changes lightweight and aligned with the existing design.
 
-## Build, Test, and Development Commands
-Create a virtual environment and install dependencies:
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-```
-Run the dev server with `flask run --host=0.0.0.0 --port=${PORT:-8081}` after exporting `FLASK_APP=photowall:app`. For production parity, launch via `gunicorn -w 4 -b 127.0.0.1:8081 'photowall:app'`.
+Scope: entire repository.
 
-## Coding Style & Naming Conventions
-Match the existing PEP 8-ish style: 4-space indentation, snake_case for functions and variables, UPPER_SNAKE for constants, and early returns instead of deep nesting. Inline HTML/CSS/JS blocks in strings should stay readable—keep line length under ~100 characters and favor f-strings over concatenation. Preserve the `_safe_name` filename pattern when touching upload logic.
+Core Principles
+- Keep it single-file: all backend and inline UI live in `photowall.py`. Do not split into packages/blueprints or add templating/build steps.
+- Inline UI: HTML/CSS/JS are string literals in `photowall.py`. Avoid front-end frameworks or bundlers.
+- Minimal deps: stick to Flask and Pillow. Adding libraries requires explicit confirmation.
+- No database: data is the files under `uploads/` and a small cache `metadata_index.json`. Do not introduce DBs or cloud storage by default.
+- Don’t over-engineer: prefer small helpers over abstractions. No type-checkers, precommit frameworks, or heavy lint suites unless asked.
 
-## Testing Guidelines
-There is no automated suite yet. Cover changes with manual checks: upload flow (when `ALLOW_UPLOAD=1`), wall refresh, slideshow transitions, and admin delete/rescan actions. When adding logic-heavy helpers, prefer small pure functions that can be unit-tested later; place tests under a future `tests/` package and name them `test_<feature>.py`.
+Behavior & Contracts
+- Uploads are disabled by default. Set `ALLOW_UPLOAD=1` to enable.
+- Admin actions require `ADMIN_PIN` via header `X-Admin-Pin`. Uploads (when enabled) may require `UPLOAD_PIN` via `X-Upload-Pin`.
+- File policy: JPG/PNG/GIF/WebP only; 10 MB max.
+- Filenames: `TIMESTAMPMS-randhex-<basename>__optional_caption.ext`. Caption is sanitized and optional.
+- Taken-time: parsed from EXIF/IPTC/XMP via Pillow; cached in `metadata_index.json` (`{"taken_ms": <epoch_ms>}` per filename). `/rescan` refreshes the cache.
+- Caching: `/uploads/*` served with `Cache-Control: public, max-age=604800, immutable`. `/list` responses are `no-store`. Preserve these headers.
 
-## Commit & Pull Request Guidelines
-Commits follow short imperative subjects (see `git log`: “Add MIT license”, “Bump license year”). Keep body text optional but wrap at 72 characters when used. For pull requests, include: 1) what changed and why, 2) how you validated it (commands or manual steps), and 3) any follow-up TODOs. Attach screenshots or GIFs for UI tweaks (`/wall`, `/slideshow`, `/admin`). Link related issues and call out whether uploads should be toggled after deployment.
+Routes (stable surface)
+- `GET /` upload page (shows “uploads closed” when disabled)
+- `GET /wall` masonry/grid gallery
+- `GET /slideshow` fullscreen slideshow
+- `GET /admin` moderation grid (delete buttons)
+- `GET /list` JSON listing (supports `limit`, `sort=upload|taken`, `order=asc|desc`, `before`)
+- `POST /upload` multipart upload (disabled unless `ALLOW_UPLOAD=1`)
+- `POST /delete` delete by filename (admin pin)
+- `POST /rescan` rebuild EXIF cache (admin pin)
+- `GET /download` ZIP of `uploads/`
+- `GET /uploads/<name>` serve stored asset
 
-## Security & Configuration Tips
-Secrets live in environment variables (`ADMIN_PIN`, `UPLOAD_PIN`, `ALLOW_UPLOAD`). Never hardcode pins or sample values in commits. Document new config flags in both `README.md` and `deploy/systemd/photowall.env.example`, and remind operators to restart the user-level systemd service after changes.
+Performance & Deploy Assumptions
+- Reverse proxy (e.g., Caddy) terminates TLS and serves `/uploads` statically. App listens on `127.0.0.1:8081` via Gunicorn.
+- ZIP creation writes to a temp path under the repo and is cleaned up after response. Keep this pattern.
 
-## Production Sync & Restart Workflow
-The live service reads from the git checkout via the `/home/erik/partywall` → `~/git/photowall` symlink. Deploy updates with:
-```bash
-cd ~/git/photowall
-git pull
-systemctl --user restart partywall
-```
-If the pull adds dependencies, run `/home/erik/partywall/venv/bin/pip install -r requirements.txt` before the restart. Validate the rollout with `systemctl --user status partywall` or `journalctl --user -u partywall -n40`.
+Code Style
+- Python 3.10+. Clear, direct code; small helper functions. Avoid broad refactors.
+- Keep UI strings simple. Do not introduce i18n systems.
+- Avoid adding global state beyond current `_metadb`/config patterns.
+
+Dev & Validation
+- Local run as in `README.md` (Flask dev server). Manually verify `/`, `/wall`, `/slideshow`, `/download`.
+- If touching EXIF or listing logic, test with a few real images and confirm ordering by `upload`/`taken` and cache updates.
+
+Changes Requiring Confirmation
+- New dependencies or external services (DBs, object storage, queues, rate-limiters).
+- Restructuring into packages/blueprints or adopting templating/build systems.
+- SPA/front-end frameworks or asset pipelines.
+- Changing filename conventions, upload limits, allowed types, or cache headers.
+- Moving/renaming `uploads/` or altering its serving path.
+
+Contributor Notes
+- Keep PRs small and focused. Update `docs/photowall-notes.md` when behavior or ops meaningfully change; keep `README.md` concise but accurate.

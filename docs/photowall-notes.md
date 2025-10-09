@@ -8,7 +8,7 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 
 * **Problem**: Easy, anonymous photo uploads at an event and live display on a wall and slideshow.
 * **Solution**: Minimal Flask app with local file storage, auto-sorted gallery, fullscreen viewer, and slideshow. Admin can delete images. Uploads can be pinned or disabled.
-* **Current state (latest)**: **Uploads disabled by default**. New endpoint to **download all images as a ZIP**.
+* **Current state (latest)**: **Uploads disabled by default**. New endpoint to **download all images as a ZIP**. Optional **VIEW_PIN** to lock the wall and slideshow behind a simple landing page.
 
 ---
 
@@ -103,6 +103,8 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 * `UPLOAD_PIN` — required header `X-Upload-Pin` on `/upload` (only if uploads are enabled).
 * `ADMIN_PIN` — required header `X-Admin-Pin` on `/delete` and `/rescan`.
 * `ALLOW_UPLOAD` — set to `1/true` to enable uploads; otherwise `/upload` returns 403.
+* `VIEW_PIN` — when set, gates viewer routes (`/`, `/wall`, `/slideshow`, `/list`, `/download`). Users can enter the PIN once (session cookie) or pass header `X-View-Pin` for programmatic access.
+* `SECRET_KEY` — optional Flask secret for sessions; if unset, falls back to `ADMIN_PIN`/`UPLOAD_PIN`/random.
 * `PORT` — optional, defaults to 8081.
 
 > In systemd, these are typically placed in `~/.config/systemd/user/photowall.env` and referenced by the unit via `EnvironmentFile=`.
@@ -179,6 +181,10 @@ example.com {
     }
 }
 ```
+
+### Optional: Lock down static assets too
+
+The app-level `VIEW_PIN` prevents discovery of content via UI and JSON (`/`, `/wall`, `/slideshow`, `/list`, `/download`). Direct image URLs under `/uploads/` remain public for performance and long-lived caching. If you want full lockdown, enforce auth at the reverse proxy for those paths as well (e.g., Caddy `basicauth` or a simple PIN form).
 
 Reload:
 
