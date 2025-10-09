@@ -16,7 +16,7 @@ Env:
 import os, re, json, time, secrets, mimetypes, tempfile, zipfile
 from pathlib import Path
 from typing import Optional
-from flask import Flask, request, send_from_directory, jsonify, Response, send_file, after_this_request
+from flask import Flask, request, send_from_directory, jsonify, Response, send_file, after_this_request, session, redirect
 
 # ---------- Paths & config ----------
 BASE = Path(__file__).resolve().parent
@@ -29,6 +29,8 @@ ALLOWED = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 # Optional pins from env
 UPLOAD_PIN = os.environ.get("UPLOAD_PIN", "").strip()
 ADMIN_PIN  = os.environ.get("ADMIN_PIN", "").strip()
+VIEW_PIN   = os.environ.get("VIEW_PIN", "").strip()
+SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
 ALLOW_UPLOAD = os.environ.get("ALLOW_UPLOAD", "0").strip().lower() in {"1","true","yes","on"}
 
 # Simple metadata cache so we don't parse EXIF on every request
@@ -39,6 +41,7 @@ except Exception:
     _metadb = {}
 
 app = Flask(__name__, static_url_path="", static_folder=str(BASE))
+app.secret_key = (SECRET_KEY or ADMIN_PIN or UPLOAD_PIN or secrets.token_hex(16))
 
 # ---------- Helpers ----------
 _slug_re = re.compile(r"[^a-zA-Z0-9_.-]+")
@@ -202,6 +205,44 @@ UPLOAD_DISABLED_HTML = """<!doctype html>
       <a class="btn" href="/slideshow">Start slideshow</a>
       <a class="btn" href="/download">Download ZIP</a>
     </div>
+  </div>
+</main>
+</body></html>
+"""
+
+LOCKED_HTML = """<!doctype html>
+<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<title>Photowall Locked</title>
+<style>
+  body{margin:0;background:#0b0c10;color:#f5f7fb;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  main{max-width:560px;margin:40px auto;padding:0 16px}
+  h1{margin:0 0 10px 0}
+  .card{background:#0f1219;border:1px solid #27304a;border-radius:14px;padding:18px}
+  input,button{background:#161922;border:1px solid #242837;color:#f5f7fb;padding:10px 12px;border-radius:12px;font:inherit}
+  form{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .muted{color:#9aa3b2}
+  .err{color:#ff8a80;margin-top:8px}
+  a{color:#8ab4ff}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  label{display:flex;gap:6px;align-items:center}
+  input[type=password]{min-width:220px}
+  .hint{font-size:14px;margin-top:8px}
+  .nav{display:flex;gap:12px;margin-top:12px}
+  .pill{font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid #27304a;color:#c7d0e8}
+  .ok{color:#8ab4ff}
+  .sp{flex:1}
+</style></head>
+<body>
+<main>
+  <h1>Photowall</h1>
+  <div class=\"card\">
+    <p class=\"muted\"><strong>The wall is locked.</strong> Enter the PIN to view the gallery and slideshow.</p>
+    <form method=\"post\" action=\"/enter\" autocomplete=\"off\">
+      <input name=\"pin\" type=\"password\" placeholder=\"View PIN\" maxlength=\"128\" required>
+      <button type=\"submit\">Enter</button>
+    </form>
+    <div class=\"hint muted\">Tip: You can also pass the PIN via header <span class=\"pill\">X-View-Pin</span> to programmatic calls.</div>
+    <div class=\"nav\"><a class=\"muted\" href=\"/\">Home</a><a class=\"muted\" href=\"/wall\">Wall</a><a class=\"muted\" href=\"/slideshow\">Slideshow</a></div>
   </div>
 </main>
 </body></html>
@@ -738,17 +779,47 @@ load(); tick();
 
 
 # ---------- Routes ----------
+def _has_view_access() -> bool:
+    if not VIEW_PIN:
+        return True
+    # Allow header override for programmatic access
+    if request.headers.get("x-view-pin", "") == VIEW_PIN:
+        return True
+    return bool(session.get("view_ok"))
+
+@app.post("/enter")
+def enter_pin():
+    if not VIEW_PIN:
+        # Nothing to do; redirect to wall
+        return redirect("/wall", code=303)
+    pin = (request.form.get("pin") if request.form else None) or (request.json or {}).get("pin") if request.is_json else None
+    if (pin or "").strip() == VIEW_PIN:
+        session["view_ok"] = True
+        # Prefer next param if provided and safe
+        nxt = request.args.get("next") or "/wall"
+        if not nxt.startswith("/"):
+            nxt = "/wall"
+        return redirect(nxt, code=303)
+    return Response("Invalid PIN", status=403, mimetype="text/plain")
+
 @app.get("/")
 def root():
+    if not _has_view_access():
+        html = LOCKED_HTML
+        return Response(html, mimetype="text/html")
     html = UPLOAD_FORM_HTML if ALLOW_UPLOAD else UPLOAD_DISABLED_HTML
     return Response(html, mimetype="text/html")
 
 @app.get("/wall")
 def wall():
+    if not _has_view_access():
+        return Response(LOCKED_HTML, mimetype="text/html")
     return Response(WALL_HTML, mimetype="text/html")
 
 @app.get("/slideshow")
 def slideshow():
+    if not _has_view_access():
+        return Response(LOCKED_HTML, mimetype="text/html")
     return Response(SLIDESHOW_HTML, mimetype="text/html")
 
 @app.get("/admin")
@@ -757,6 +828,11 @@ def admin():
 
 @app.get("/list")
 def list_files():
+    if not _has_view_access():
+        resp = jsonify({"error": "forbidden"})
+        resp.status_code = 403
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
     # Only 'upload' and 'taken' supported
     try:
         limit = int(request.args.get("limit", "200"))
@@ -871,6 +947,8 @@ def rescan_metadata():
 
 @app.get("/download")
 def download_zip():
+    if not _has_view_access():
+        return ("Forbidden", 403)
     """Create a ZIP of all images in /uploads and return it as attachment.
        The ZIP is written to a temp dir under BASE and deleted after response.
     """
