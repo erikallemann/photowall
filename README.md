@@ -31,6 +31,7 @@ Environment variables read at startup:
 
 - `ADMIN_PIN` – required header `X-Admin-Pin` on `/delete` and `/rescan`.
 - `UPLOAD_PIN` – optional header `X-Upload-Pin` on `/upload`.
+- `VIEW_PIN` – gates `/`, `/wall`, `/slideshow`, `/list`, and `/download`; users must submit the PIN once per browser session.
 - `ALLOW_UPLOAD` – set to `1/true/on` to enable uploads; otherwise `/upload` returns HTTP 403.
 - `PORT` – listen port when running the Flask development server (`default=8081`). Gunicorn users can pick any port in their unit file.
 

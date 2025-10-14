@@ -792,7 +792,10 @@ def enter_pin():
     if not VIEW_PIN:
         # Nothing to do; redirect to wall
         return redirect("/wall", code=303)
-    pin = (request.form.get("pin") if request.form else None) or (request.json or {}).get("pin") if request.is_json else None
+    pin = request.form.get("pin")
+    if pin is None and request.is_json:
+        data = request.get_json(silent=True) or {}
+        pin = data.get("pin")
     if (pin or "").strip() == VIEW_PIN:
         session["view_ok"] = True
         # Prefer next param if provided and safe

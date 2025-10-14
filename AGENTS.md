@@ -14,6 +14,7 @@ Core Principles
 Behavior & Contracts
 - Uploads are disabled by default. Set `ALLOW_UPLOAD=1` to enable.
 - Admin actions require `ADMIN_PIN` via header `X-Admin-Pin`. Uploads (when enabled) may require `UPLOAD_PIN` via `X-Upload-Pin`.
+- Optional `VIEW_PIN` gates viewer routes (`/`, `/wall`, `/slideshow`, `/list`, `/download`); once entered the session cookie grants access.
 - File policy: JPG/PNG/GIF/WebP only; 10 MB max.
 - Filenames: `TIMESTAMPMS-randhex-<basename>__optional_caption.ext`. Caption is sanitized and optional.
 - Taken-time: parsed from EXIF/IPTC/XMP via Pillow; cached in `metadata_index.json` (`{"taken_ms": <epoch_ms>}` per filename). `/rescan` refreshes the cache.
