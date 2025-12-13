@@ -279,9 +279,9 @@ UPLOAD_FORM_HTML = """<!doctype html>
     </nav>
   </header>
   <form id="uploadForm">
-    <p class="muted">Choose a photo, add an optional caption, and enter the upload PIN if required. Max 10&nbsp;MB. Accepted formats: JPG/PNG/GIF/WebP.</p>
-    <label>Photo
-      <input id="file" name="file" type="file" accept="image/*" required>
+    <p class="muted">Choose one or more photos, add an optional caption, and enter the upload PIN if required. Max 10&nbsp;MB per file. Accepted formats: JPG/PNG/GIF/WebP.</p>
+    <label>Photos
+      <input id="file" name="file" type="file" accept="image/*" multiple required>
     </label>
     <label>Caption (optional, 40 characters)
       <input id="caption" name="caption" maxlength="40" placeholder="e.g. Couple on stage">
@@ -299,21 +299,33 @@ const fileInput = document.getElementById('file');
 const captionInput = document.getElementById('caption');
 const pinInput = document.getElementById('pin');
 const statusEl = document.getElementById('status');
+const submitBtn = form.querySelector('button[type=submit]');
 
 function setStatus(text, cls){
   statusEl.textContent = text;
   statusEl.className = cls || '';
 }
 
+fileInput.addEventListener('change', ()=>{
+  const n = (fileInput.files || []).length;
+  if(n){
+    setStatus(`${n} photo${n===1?'':'s'} selected.`, '');
+  } else {
+    setStatus('', '');
+  }
+});
+
 form.addEventListener('submit', async (ev)=>{
   ev.preventDefault();
-  const file = fileInput.files[0];
-  if(!file){
-    setStatus('Select a photo first.', 'error');
+  const files = Array.from(fileInput.files || []);
+  if(files.length === 0){
+    setStatus('Select at least one photo first.', 'error');
     return;
   }
   const fd = new FormData();
-  fd.append('file', file);
+  for(const f of files){
+    fd.append('file', f, f.name);
+  }
   const caption = captionInput.value.trim();
   if(caption) fd.append('caption', caption);
 
@@ -321,12 +333,28 @@ form.addEventListener('submit', async (ev)=>{
   const pin = pinInput.value.trim();
   if(pin) headers['X-Upload-Pin'] = pin;
 
-  setStatus('Uploading...', '');
+  const plural = files.length === 1 ? '' : 's';
+  setStatus(`Uploading ${files.length} photo${plural}...`, '');
+  submitBtn.disabled = true;
   try{
     const res = await fetch('/upload', {method:'POST', body: fd, headers});
-    if(res.status === 201){
-      setStatus('Upload successful!', 'ok');
-      form.reset();
+    const txt = await res.text();
+    let data = null;
+    try{ data = JSON.parse(txt); }catch(e){}
+
+    if(res.ok){
+      if(data && typeof data.saved === 'number'){
+        const errN = Array.isArray(data.errors) ? data.errors.length : 0;
+        if(errN){
+          setStatus(`Uploaded ${data.saved} photo${data.saved===1?'':'s'} (${errN} failed).`, 'error');
+        } else {
+          setStatus(`Uploaded ${data.saved} photo${data.saved===1?'':'s'}!`, 'ok');
+          form.reset();
+        }
+      } else {
+        setStatus('Upload successful!', 'ok');
+        form.reset();
+      }
     } else if(res.status === 403){
       setStatus('Incorrect PIN or uploads disabled.', 'error');
     } else if(res.status === 413){
@@ -336,6 +364,8 @@ form.addEventListener('submit', async (ev)=>{
     }
   } catch(err){
     setStatus('Network error, please try again.', 'error');
+  } finally {
+    submitBtn.disabled = false;
   }
 });
 </script>
@@ -890,30 +920,58 @@ def upload():
         return ("Uploads are disabled", 403)
     if UPLOAD_PIN and request.headers.get("x-upload-pin","") != UPLOAD_PIN:
         return ("Forbidden", 403)
-    f = request.files.get("file")
-    if not f: return ("No file provided", 400)
-    f.stream.seek(0, os.SEEK_END)
-    size = f.stream.tell()
-    f.stream.seek(0)
-    if size > MAX_BYTES:
-        return ("File too large", 413)
-    safe = _safe_name(f.filename or "upload.jpg")
     caption = (request.form.get("caption") or "").strip()
     caption = _slug_re.sub("_", caption)[:40]
-    ts = _now_ms()
-    name = f"{ts}-{secrets.token_hex(3)}-{safe}"
-    if caption:
-        stem, ext = os.path.splitext(safe)
-        name = f"{ts}-{secrets.token_hex(3)}-{stem}__{caption}{ext}"
-    outp = (UPLOAD_DIR / name)
-    f.save(outp)
-    try:
-        taken = _exif_taken_ms(outp)
-        _metadb[name] = {"taken_ms": taken}
-        _save_metadb()
-    except Exception:
-        pass
-    return ("OK", 201)
+    files = request.files.getlist("file")
+    if not files:
+        return ("No file provided", 400)
+
+    saved = []
+    errors = []
+    for f in files:
+        if not f:
+            continue
+        try:
+            f.stream.seek(0, os.SEEK_END)
+            size = f.stream.tell()
+            f.stream.seek(0)
+        except Exception:
+            size = None
+        if size is not None and size > MAX_BYTES:
+            errors.append({"filename": f.filename or "", "error": "File too large"})
+            continue
+
+        safe = _safe_name(f.filename or "upload.jpg")
+        ts = _now_ms()
+        token = secrets.token_hex(3)
+        name = f"{ts}-{token}-{safe}"
+        if caption:
+            stem, ext = os.path.splitext(safe)
+            name = f"{ts}-{token}-{stem}__{caption}{ext}"
+        outp = (UPLOAD_DIR / name)
+        try:
+            f.save(outp)
+        except Exception:
+            errors.append({"filename": f.filename or "", "error": "Save failed"})
+            continue
+
+        saved.append({"name": name, "url": f"/uploads/{name}"})
+        try:
+            taken = _exif_taken_ms(outp)
+            _metadb[name] = {"taken_ms": taken}
+            _save_metadb()
+        except Exception:
+            pass
+
+    if len(files) == 1 and saved and not errors:
+        return ("OK", 201)
+
+    if not saved:
+        status = 413 if any((e.get("error") == "File too large") for e in errors) else 400
+        return (jsonify({"saved": 0, "received": len(files), "items": [], "errors": errors}), status)
+
+    status = 201 if not errors else 207
+    return (jsonify({"saved": len(saved), "received": len(files), "items": saved, "errors": errors}), status)
 
 @app.post("/delete")
 def delete():

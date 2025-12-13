@@ -60,7 +60,8 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
   * `ts` = upload timestamp (ms). `tk` = taken timestamp (ms, may be null). `cap` = caption from filename if present.
 * `POST /upload` — **Disabled by default**; returns `403` unless `ALLOW_UPLOAD=1` set.
 
-  * When enabled: requires header `X-Upload-Pin` if `UPLOAD_PIN` env is set. Max size 10 MB. Types: JPG/PNG/GIF/WebP.
+  * When enabled: requires header `X-Upload-Pin` if `UPLOAD_PIN` env is set. Max size 10 MB per file. Types: JPG/PNG/GIF/WebP.
+  * The upload form supports selecting multiple photos in one request; the (optional) caption applies to all selected photos.
 * `POST /delete` — Delete one file. Header `X-Admin-Pin: <pin>` must match `ADMIN_PIN`. Returns `204` on success.
 * `POST /rescan` — Re-parse EXIF for all images. Header `X-Admin-Pin` required.
 * `GET /download` — Creates a ZIP of `uploads/` on demand and streams it (temp file cleaned up after send).
