@@ -13,10 +13,12 @@ Env:
   ALLOW_UPLOAD=1 to re-enable uploads later if desired.
 """
 
-import os, re, json, time, secrets, mimetypes, tempfile, zipfile
+import os, re, json, time, secrets, mimetypes, tempfile, zipfile, unicodedata
+import hmac
 from pathlib import Path
 from typing import Optional
 from flask import Flask, request, send_from_directory, jsonify, Response, send_file, after_this_request, session, redirect
+from urllib.parse import quote
 
 # ---------- Paths & config ----------
 BASE = Path(__file__).resolve().parent
@@ -24,6 +26,7 @@ UPLOAD_DIR = BASE / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_FILES_PER_UPLOAD = 25
 ALLOWED = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 # Optional pins from env
@@ -39,12 +42,44 @@ try:
     _metadb = json.loads(METADB_PATH.read_text("utf-8")) if METADB_PATH.exists() else {}
 except Exception:
     _metadb = {}
+try:
+    _metadb_mtime = METADB_PATH.stat().st_mtime if METADB_PATH.exists() else None
+except Exception:
+    _metadb_mtime = None
 
 app = Flask(__name__, static_url_path="", static_folder=str(BASE))
 app.secret_key = (SECRET_KEY or ADMIN_PIN or UPLOAD_PIN or secrets.token_hex(16))
 
 # ---------- Helpers ----------
 _slug_re = re.compile(r"[^a-zA-Z0-9_.-]+")
+
+def _safe_next_path(nxt: str) -> str:
+    nxt = (nxt or "").strip()
+    if not nxt.startswith("/"):
+        return "/wall"
+    # Prevent absolute/host-relative redirects.
+    if nxt.startswith("//") or "://" in nxt:
+        return "/wall"
+    return nxt
+
+def _view_access_ok() -> bool:
+    if not VIEW_PIN:
+        return True
+    if session.get("view_ok"):
+        return True
+    header_pin = (request.headers.get("x-view-pin", "") or "").strip()
+    return bool(header_pin) and hmac.compare_digest(header_pin, VIEW_PIN)
+
+def _locked_response():
+    if _view_access_ok():
+        return None
+    nxt = request.full_path
+    if nxt.endswith("?"):
+        nxt = request.path
+    nxt = _safe_next_path(nxt)
+    html = LOCKED_HTML.replace("__NEXT__", quote(nxt, safe=""))
+    html = html.replace("__ERROR_HTML__", "")
+    return Response(html, status=401, mimetype="text/html")
 
 def _safe_name(original: str) -> str:
     base, ext = os.path.splitext(original or "upload.jpg")
@@ -58,11 +93,58 @@ def _safe_name(original: str) -> str:
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
+def _clean_caption(raw: str) -> str:
+    """Normalize and clamp captions while keeping wide characters."""
+    cap = unicodedata.normalize("NFC", (raw or "")).strip()
+    cap = "".join(ch for ch in cap if ch.isprintable() and ch not in "\r\n\t")
+    return cap[:80]
+
+def _slug_caption_for_filename(caption: str) -> str:
+    """ASCII-safe slug for filenames; keeps display caption elsewhere."""
+    ascii_cap = unicodedata.normalize("NFKD", caption).encode("ascii", "ignore").decode("ascii")
+    ascii_cap = _slug_re.sub("_", ascii_cap)
+    ascii_cap = re.sub("_+", "_", ascii_cap).strip("_")
+    return ascii_cap[:40]
+
 def _save_metadb():
+    global _metadb_mtime
     try:
         METADB_PATH.write_text(json.dumps(_metadb, ensure_ascii=False), "utf-8")
+        try:
+            _metadb_mtime = METADB_PATH.stat().st_mtime
+        except Exception:
+            pass
     except Exception:
         pass
+
+def _reload_metadb_if_changed():
+    """Reload metadata_index.json if it changed on disk (multi-worker Gunicorn)."""
+    global _metadb, _metadb_mtime
+    try:
+        st = METADB_PATH.stat()
+    except FileNotFoundError:
+        if _metadb_mtime is not None:
+            _metadb = {}
+            _metadb_mtime = None
+        return
+    except Exception:
+        return
+    if _metadb_mtime is None or st.st_mtime != _metadb_mtime:
+        try:
+            _metadb = json.loads(METADB_PATH.read_text("utf-8"))
+            _metadb_mtime = st.st_mtime
+        except Exception:
+            pass
+
+def _update_metadb_entry(name: str, *, taken_ms: Optional[int] = None, caption: Optional[str] = None):
+    rec = _metadb.get(name)
+    rec = rec if isinstance(rec, dict) else {}
+    if taken_ms is not None:
+        rec["taken_ms"] = taken_ms
+    if caption is not None:
+        rec["caption"] = caption
+    _metadb[name] = rec
+    _save_metadb()
 
 def _parse_exif_date_to_epoch_ms(s: str) -> Optional[int]:
     """Accept common EXIF/IPTC/XMP date formats and return epoch ms."""
@@ -173,14 +255,13 @@ def _get_taken_ms_cached(p: Path) -> Optional[int]:
     if isinstance(rec, dict) and "taken_ms" in rec:
         return rec.get("taken_ms")
     taken = _exif_taken_ms(p)
-    _metadb[fn] = {"taken_ms": taken}
-    _save_metadb()
+    _update_metadb_entry(fn, taken_ms=taken)
     return taken
 
 # ---------- HTML ----------
 UPLOAD_DISABLED_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Upload Photos</title>
+<title>Photowall</title>
 <style>
   body{margin:0;background:#0b0c10;color:#f5f7fb;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
   main{max-width:720px;margin:40px auto;padding:0 16px}
@@ -237,10 +318,11 @@ LOCKED_HTML = """<!doctype html>
   <h1>Photowall</h1>
   <div class=\"card\">
     <p class=\"muted\"><strong>The wall is locked.</strong> Enter the PIN to view the gallery and slideshow.</p>
-    <form method=\"post\" action=\"/enter\" autocomplete=\"off\">
+    <form method=\"post\" action=\"/enter?next=__NEXT__\" autocomplete=\"off\">
       <input name=\"pin\" type=\"password\" placeholder=\"View PIN\" maxlength=\"128\" required>
       <button type=\"submit\">Enter</button>
     </form>
+    __ERROR_HTML__
     <div class=\"hint muted\">Tip: You can also pass the PIN via header <span class=\"pill\">X-View-Pin</span> to programmatic calls.</div>
     <div class=\"nav\"><a class=\"muted\" href=\"/\">Home</a><a class=\"muted\" href=\"/wall\">Wall</a><a class=\"muted\" href=\"/slideshow\">Slideshow</a></div>
   </div>
@@ -279,12 +361,12 @@ UPLOAD_FORM_HTML = """<!doctype html>
     </nav>
   </header>
   <form id="uploadForm">
-    <p class="muted">Choose a photo, add an optional caption, and enter the upload PIN if required. Max 10&nbsp;MB. Accepted formats: JPG/PNG/GIF/WebP.</p>
-    <label>Photo
-      <input id="file" name="file" type="file" accept="image/*" required>
+    <p class="muted">Choose one or more photos, add an optional caption (applies to all selected), and enter the upload PIN if required. Max 10&nbsp;MB per file. Accepted formats: JPG/PNG/GIF/WebP.</p>
+    <label>Photos
+      <input id="file" name="file" type="file" accept="image/*" multiple required>
     </label>
-    <label>Caption (optional, 40 characters)
-      <input id="caption" name="caption" maxlength="40" placeholder="e.g. Couple on stage">
+    <label>Caption (optional, 80 characters)
+      <input id="caption" name="caption" maxlength="80" placeholder="e.g. Couple on stage">
     </label>
     <label>PIN (if required)
       <input id="pin" maxlength="64" autocomplete="off" placeholder="Enter upload PIN">
@@ -299,21 +381,33 @@ const fileInput = document.getElementById('file');
 const captionInput = document.getElementById('caption');
 const pinInput = document.getElementById('pin');
 const statusEl = document.getElementById('status');
+const submitBtn = form.querySelector('button[type=submit]');
 
 function setStatus(text, cls){
   statusEl.textContent = text;
   statusEl.className = cls || '';
 }
 
+fileInput.addEventListener('change', ()=>{
+  const n = (fileInput.files || []).length;
+  if(n){
+    setStatus(`${n} photo${n===1?'':'s'} selected.`, '');
+  } else {
+    setStatus('', '');
+  }
+});
+
 form.addEventListener('submit', async (ev)=>{
   ev.preventDefault();
-  const file = fileInput.files[0];
-  if(!file){
-    setStatus('Select a photo first.', 'error');
+  const files = Array.from(fileInput.files || []);
+  if(files.length === 0){
+    setStatus('Select at least one photo first.', 'error');
     return;
   }
   const fd = new FormData();
-  fd.append('file', file);
+  for(const f of files){
+    fd.append('file', f, f.name);
+  }
   const caption = captionInput.value.trim();
   if(caption) fd.append('caption', caption);
 
@@ -321,12 +415,28 @@ form.addEventListener('submit', async (ev)=>{
   const pin = pinInput.value.trim();
   if(pin) headers['X-Upload-Pin'] = pin;
 
-  setStatus('Uploading...', '');
+  const plural = files.length === 1 ? '' : 's';
+  setStatus(`Uploading ${files.length} photo${plural}...`, '');
+  submitBtn.disabled = true;
   try{
     const res = await fetch('/upload', {method:'POST', body: fd, headers});
-    if(res.status === 201){
-      setStatus('Upload successful!', 'ok');
-      form.reset();
+    const txt = await res.text();
+    let data = null;
+    try{ data = JSON.parse(txt); }catch(e){}
+
+    if(res.ok){
+      if(data && typeof data.saved === 'number'){
+        const errN = Array.isArray(data.errors) ? data.errors.length : 0;
+        if(errN){
+          setStatus(`Uploaded ${data.saved} photo${data.saved===1?'':'s'} (${errN} failed).`, 'error');
+        } else {
+          setStatus(`Uploaded ${data.saved} photo${data.saved===1?'':'s'}!`, 'ok');
+          form.reset();
+        }
+      } else {
+        setStatus('Upload successful!', 'ok');
+        form.reset();
+      }
     } else if(res.status === 403){
       setStatus('Incorrect PIN or uploads disabled.', 'error');
     } else if(res.status === 413){
@@ -336,6 +446,8 @@ form.addEventListener('submit', async (ev)=>{
     }
   } catch(err){
     setStatus('Network error, please try again.', 'error');
+  } finally {
+    submitBtn.disabled = false;
   }
 });
 </script>
@@ -779,50 +891,26 @@ load(); tick();
 
 
 # ---------- Routes ----------
-def _has_view_access() -> bool:
-    if not VIEW_PIN:
-        return True
-    # Allow header override for programmatic access
-    if request.headers.get("x-view-pin", "") == VIEW_PIN:
-        return True
-    return bool(session.get("view_ok"))
-
-@app.post("/enter")
-def enter_pin():
-    if not VIEW_PIN:
-        # Nothing to do; redirect to wall
-        return redirect("/wall", code=303)
-    pin = request.form.get("pin")
-    if pin is None and request.is_json:
-        data = request.get_json(silent=True) or {}
-        pin = data.get("pin")
-    if (pin or "").strip() == VIEW_PIN:
-        session["view_ok"] = True
-        # Prefer next param if provided and safe
-        nxt = request.args.get("next") or "/wall"
-        if not nxt.startswith("/"):
-            nxt = "/wall"
-        return redirect(nxt, code=303)
-    return Response("Invalid PIN", status=403, mimetype="text/plain")
-
 @app.get("/")
 def root():
-    if not _has_view_access():
-        html = LOCKED_HTML
-        return Response(html, mimetype="text/html")
+    locked = _locked_response()
+    if locked:
+        return locked
     html = UPLOAD_FORM_HTML if ALLOW_UPLOAD else UPLOAD_DISABLED_HTML
     return Response(html, mimetype="text/html")
 
 @app.get("/wall")
 def wall():
-    if not _has_view_access():
-        return Response(LOCKED_HTML, mimetype="text/html")
+    locked = _locked_response()
+    if locked:
+        return locked
     return Response(WALL_HTML, mimetype="text/html")
 
 @app.get("/slideshow")
 def slideshow():
-    if not _has_view_access():
-        return Response(LOCKED_HTML, mimetype="text/html")
+    locked = _locked_response()
+    if locked:
+        return locked
     return Response(SLIDESHOW_HTML, mimetype="text/html")
 
 @app.get("/admin")
@@ -831,11 +919,10 @@ def admin():
 
 @app.get("/list")
 def list_files():
-    if not _has_view_access():
-        resp = jsonify({"error": "forbidden"})
-        resp.status_code = 403
-        resp.headers["Cache-Control"] = "no-store"
-        return resp
+    locked = _locked_response()
+    if locked:
+        return locked
+    _reload_metadb_if_changed()
     # Only 'upload' and 'taken' supported
     try:
         limit = int(request.args.get("limit", "200"))
@@ -866,8 +953,11 @@ def list_files():
             ts_upload = int(st.st_mtime * 1000)
         if before_ms and ts_upload >= before_ms:
             continue
+        rec = _metadb.get(p.name) if isinstance(_metadb.get(p.name), dict) else {}
         taken_ms = _get_taken_ms_cached(p)
-        cap = (p.stem.split("__",1)[1].replace("_"," ").strip() if "__" in p.stem else "")[:80]
+        cap = _clean_caption(rec.get("caption", "")) if rec else ""
+        if not cap and "__" in p.stem:
+            cap = _clean_caption(p.stem.split("__",1)[1].replace("_"," "))
         items.append({
             "name": p.name,
             "url": f"/uploads/{p.name}",
@@ -890,30 +980,59 @@ def upload():
         return ("Uploads are disabled", 403)
     if UPLOAD_PIN and request.headers.get("x-upload-pin","") != UPLOAD_PIN:
         return ("Forbidden", 403)
-    f = request.files.get("file")
-    if not f: return ("No file provided", 400)
-    f.stream.seek(0, os.SEEK_END)
-    size = f.stream.tell()
-    f.stream.seek(0)
-    if size > MAX_BYTES:
-        return ("File too large", 413)
-    safe = _safe_name(f.filename or "upload.jpg")
-    caption = (request.form.get("caption") or "").strip()
-    caption = _slug_re.sub("_", caption)[:40]
-    ts = _now_ms()
-    name = f"{ts}-{secrets.token_hex(3)}-{safe}"
-    if caption:
-        stem, ext = os.path.splitext(safe)
-        name = f"{ts}-{secrets.token_hex(3)}-{stem}__{caption}{ext}"
-    outp = (UPLOAD_DIR / name)
-    f.save(outp)
-    try:
-        taken = _exif_taken_ms(outp)
-        _metadb[name] = {"taken_ms": taken}
-        _save_metadb()
-    except Exception:
-        pass
-    return ("OK", 201)
+    caption = _clean_caption(request.form.get("caption") or "")
+    caption_slug = _slug_caption_for_filename(caption) if caption else ""
+
+    files = [f for f in request.files.getlist("file") if f and getattr(f, "filename", None)]
+    if not files:
+        return ("No file provided", 400)
+    if len(files) > MAX_FILES_PER_UPLOAD:
+        return (f"Too many files (max {MAX_FILES_PER_UPLOAD})", 400)
+
+    saved = []
+    errors = []
+    for f in files:
+        if not f:
+            continue
+        try:
+            f.stream.seek(0, os.SEEK_END)
+            size = f.stream.tell()
+            f.stream.seek(0)
+        except Exception:
+            size = None
+        if size is not None and size > MAX_BYTES:
+            errors.append({"filename": f.filename or "", "error": "File too large"})
+            continue
+
+        safe = _safe_name(f.filename or "upload.jpg")
+        ts = _now_ms()
+        token = secrets.token_hex(3)
+        name = f"{ts}-{token}-{safe}"
+        if caption_slug:
+            stem, ext = os.path.splitext(safe)
+            name = f"{ts}-{token}-{stem}__{caption_slug}{ext}"
+        outp = (UPLOAD_DIR / name)
+        try:
+            f.save(outp)
+        except Exception:
+            errors.append({"filename": f.filename or "", "error": "Save failed"})
+            continue
+        saved.append({"name": name, "url": f"/uploads/{name}"})
+        try:
+            taken = _exif_taken_ms(outp)
+            _update_metadb_entry(name, taken_ms=taken, caption=(caption or None))
+        except Exception:
+            pass
+
+    if len(files) == 1 and saved and not errors:
+        return ("OK", 201)
+
+    if not saved:
+        status = 413 if any((e.get("error") == "File too large") for e in errors) else 400
+        return (jsonify({"saved": 0, "received": len(files), "items": [], "errors": errors}), status)
+
+    status = 201 if not errors else 207
+    return (jsonify({"saved": len(saved), "received": len(files), "items": saved, "errors": errors}), status)
 
 @app.post("/delete")
 def delete():
@@ -950,11 +1069,12 @@ def rescan_metadata():
 
 @app.get("/download")
 def download_zip():
-    if not _has_view_access():
-        return ("Forbidden", 403)
     """Create a ZIP of all images in /uploads and return it as attachment.
        The ZIP is written to a temp dir under BASE and deleted after response.
     """
+    locked = _locked_response()
+    if locked:
+        return locked
     ts_str = time.strftime("%Y%m%d-%H%M%S")
     tmpdir = tempfile.mkdtemp(prefix="photowall_zip_", dir=str(BASE))
     zpath = Path(tmpdir) / f"photowall-{ts_str}.zip"
@@ -978,6 +1098,7 @@ def download_zip():
         except Exception:
             pass
         return response
+
     return send_file(
         zpath,
         as_attachment=True,
@@ -985,6 +1106,23 @@ def download_zip():
         mimetype="application/zip",
         conditional=True,
     )
+
+@app.post("/enter")
+def enter_view_pin():
+    if not VIEW_PIN:
+        session.pop("view_ok", None)
+        return redirect("/wall", code=303)
+
+    pin = (request.form.get("pin", "") or "").strip()
+    if hmac.compare_digest(pin, VIEW_PIN):
+        session["view_ok"] = True
+        nxt = _safe_next_path(request.args.get("next") or "/wall")
+        return redirect(nxt, code=303)
+
+    nxt = _safe_next_path(request.args.get("next") or "/wall")
+    html = LOCKED_HTML.replace("__NEXT__", quote(nxt, safe=""))
+    html = html.replace("__ERROR_HTML__", "<div class=\"err\">Incorrect PIN</div>")
+    return Response(html, status=403, mimetype="text/html")
 
 @app.get("/uploads/<path:filename>")
 def serve_upload(filename):

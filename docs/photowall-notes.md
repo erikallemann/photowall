@@ -8,7 +8,7 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 
 * **Problem**: Easy, anonymous photo uploads at an event and live display on a wall and slideshow.
 * **Solution**: Minimal Flask app with local file storage, auto-sorted gallery, fullscreen viewer, and slideshow. Admin can delete images. Uploads can be pinned or disabled.
-* **Current state (latest)**: **Uploads disabled by default**. New endpoint to **download all images as a ZIP**. Optional **VIEW_PIN** to lock the wall and slideshow behind a simple landing page.
+* **Current state (latest)**: **Uploads disabled by default**. New endpoint to **download all images as a ZIP**. Optional **VIEW_PIN** locks viewer routes behind a PIN entry page (`POST /enter`, session cookie).
 
 ---
 
@@ -27,7 +27,7 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
   photowall.py           # Flask app (single file)
   .venv/                 # Python virtualenv
   uploads/               # Image files (source of truth)
-  metadata_index.json    # Cache of parsed EXIF/IPTC taken-time
+  metadata_index.json    # Cache of parsed EXIF/IPTC taken-time and captions
 ```
 
 ---
@@ -45,6 +45,7 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 
   * `TIMESTAMPMS-randhex-<basename>__optional_caption.ext`
   * Example: `1756651339565-3fcfcd-IMG_9722__hej.jpeg`
+* Captions are stored verbatim (Unicode) in `metadata_index.json` under `caption`; filenames keep an ASCII slug for compatibility, with legacy caption fallback from the filename when metadata is missing.
 * **Upload time** is extracted from the filename prefix when present, else file mtime.
 * **Taken time** parsed from EXIF/IPTC/XMP via Pillow and cached in `metadata_index.json` (`{"taken_ms": <epoch_ms>}` per filename).
 
@@ -57,10 +58,11 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 * `GET /list` — JSON listing of images: `[{name,url,ts,tk,cap}]`.
 
   * Query: `limit` (default 200, capped), `sort=upload|taken`, `order=asc|desc` (default desc), optional `before` ms.
-  * `ts` = upload timestamp (ms). `tk` = taken timestamp (ms, may be null). `cap` = caption from filename if present.
+  * `ts` = upload timestamp (ms). `tk` = taken timestamp (ms, may be null). `cap` = caption from metadata (Unicode), falling back to filename slug.
 * `POST /upload` — **Disabled by default**; returns `403` unless `ALLOW_UPLOAD=1` set.
 
-  * When enabled: requires header `X-Upload-Pin` if `UPLOAD_PIN` env is set. Max size 10 MB. Types: JPG/PNG/GIF/WebP.
+  * When enabled: requires header `X-Upload-Pin` if `UPLOAD_PIN` env is set. Max size 10 MB per file. Types: JPG/PNG/GIF/WebP.
+  * The upload form supports selecting multiple photos in one request; the (optional) caption applies to all selected photos.
 * `POST /delete` — Delete one file. Header `X-Admin-Pin: <pin>` must match `ADMIN_PIN`. Returns `204` on success.
 * `POST /rescan` — Re-parse EXIF for all images. Header `X-Admin-Pin` required.
 * `GET /download` — Creates a ZIP of `uploads/` on demand and streams it (temp file cleaned up after send).
@@ -104,6 +106,7 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 * `ADMIN_PIN` — required header `X-Admin-Pin` on `/delete` and `/rescan`.
 * `ALLOW_UPLOAD` — set to `1/true` to enable uploads; otherwise `/upload` returns 403.
 * `VIEW_PIN` — when set, gates viewer routes (`/`, `/wall`, `/slideshow`, `/list`, `/download`). Users can enter the PIN once (session cookie) or pass header `X-View-Pin` for programmatic access.
+  * Note: `/download` builds the ZIP before streaming, so the first response may take a few seconds on large galleries.
 * `SECRET_KEY` — optional Flask secret for sessions; if unset, falls back to `ADMIN_PIN`/`UPLOAD_PIN`/random.
 * `PORT` — optional, defaults to 8081.
 
