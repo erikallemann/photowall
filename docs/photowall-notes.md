@@ -9,6 +9,7 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 * **Problem**: Easy, anonymous photo uploads at an event and live display on a wall and slideshow.
 * **Solution**: Minimal Flask app with local file storage, auto-sorted gallery, fullscreen viewer, and slideshow. Admin can delete images. Uploads can be pinned or disabled.
 * **Current state (latest)**: **Uploads disabled by default**. New endpoint to **download all images as a ZIP**. Optional **VIEW_PIN** to lock the wall and slideshow behind a simple landing page.
+* **Optional library mode**: Set `PHOTO_ROOT` to browse an existing folder (optionally recursive) and use EXIF taken-time sorting without importing/copying photos.
 
 ---
 
@@ -17,6 +18,7 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 * **Domain**: `example.com` (served by Caddy with TLS, adjust to your domain).
 * **App**: Flask app `photowall.py` running via **Gunicorn** bound to `127.0.0.1:8081` (user-level systemd service), reverse-proxied by **Caddy** on 443.
 * **Data storage**: Local folder `~/photowall/uploads/` with images. Lightweight EXIF cache in `metadata_index.json` at app root.
+  * When `PHOTO_ROOT` is set, the *browsed* folder becomes the source of images; the app defaults to **read-only** and can scan recursively.
 
 ---
 
@@ -57,13 +59,13 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 * `GET /list` — JSON listing of images: `[{name,url,ts,tk,cap}]`.
 
   * Query: `limit` (default 200, capped), `sort=upload|taken`, `order=asc|desc` (default desc), optional `before` ms.
-  * `ts` = upload timestamp (ms). `tk` = taken timestamp (ms, may be null). `cap` = caption from filename if present.
+  * `ts` = upload timestamp (ms) when filenames follow the upload convention; otherwise falls back to file mtime. `tk` = taken timestamp (ms, may be null). `cap` = caption from filename if present.
 * `POST /upload` — **Disabled by default**; returns `403` unless `ALLOW_UPLOAD=1` set.
 
   * When enabled: requires header `X-Upload-Pin` if `UPLOAD_PIN` env is set. Max size 10 MB. Types: JPG/PNG/GIF/WebP.
 * `POST /delete` — Delete one file. Header `X-Admin-Pin: <pin>` must match `ADMIN_PIN`. Returns `204` on success.
 * `POST /rescan` — Re-parse EXIF for all images. Header `X-Admin-Pin` required.
-* `GET /download` — Creates a ZIP of `uploads/` on demand and streams it (temp file cleaned up after send).
+* `GET /download` — Creates a ZIP of `uploads/` on demand and streams it (temp file cleaned up after send). Disabled when browsing an external `PHOTO_ROOT`.
 * `GET /uploads/<filename>` — Serves original image (with long Cache-Control).
 
 ### Sorting Logic
@@ -103,6 +105,10 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 * `UPLOAD_PIN` — required header `X-Upload-Pin` on `/upload` (only if uploads are enabled).
 * `ADMIN_PIN` — required header `X-Admin-Pin` on `/delete` and `/rescan`.
 * `ALLOW_UPLOAD` — set to `1/true` to enable uploads; otherwise `/upload` returns 403.
+* `PHOTO_ROOT` — optional folder to browse instead of `uploads/` (supports absolute paths like `/mnt/...`). Defaults to recursive scanning and read-only when set.
+* `PHOTO_RECURSIVE` — set to `1/true` to scan `PHOTO_ROOT` recursively (default: `1` when `PHOTO_ROOT` is set).
+* `PHOTO_READONLY` — set to `0/false` to allow mutations when browsing `uploads/` (default: read-only when `PHOTO_ROOT` points elsewhere).
+* `PHOTO_SKIP_HIDDEN` — set to `0/false` to include dotfiles/dotfolders (default: `1`).
 * `VIEW_PIN` — when set, gates viewer routes (`/`, `/wall`, `/slideshow`, `/list`, `/download`). Users can enter the PIN once (session cookie) or pass header `X-View-Pin` for programmatic access.
 * `SECRET_KEY` — optional Flask secret for sessions; if unset, falls back to `ADMIN_PIN`/`UPLOAD_PIN`/random.
 * `PORT` — optional, defaults to 8081.
@@ -162,6 +168,7 @@ example.com {
 
     # Serve uploaded files directly (faster than proxying to Flask)
     handle_path /uploads/* {
+        # If using PHOTO_ROOT, set this to that folder instead of uploads/
         root * ~/photowall/uploads
         file_server
         header Cache-Control "public, max-age=604800, immutable"

@@ -16,12 +16,40 @@ Env:
 import os, re, json, time, secrets, mimetypes, tempfile, zipfile
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 from flask import Flask, request, send_from_directory, jsonify, Response, send_file, after_this_request, session, redirect
 
 # ---------- Paths & config ----------
 BASE = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+PHOTO_ROOT = os.environ.get("PHOTO_ROOT", "").strip()
+PHOTO_DIR = (Path(PHOTO_ROOT).expanduser() if PHOTO_ROOT else UPLOAD_DIR)
+if not PHOTO_DIR.is_absolute():
+    PHOTO_DIR = (BASE / PHOTO_DIR).resolve()
+
+_photo_recursive_env = os.environ.get("PHOTO_RECURSIVE", "").strip().lower()
+if _photo_recursive_env:
+    PHOTO_RECURSIVE = _photo_recursive_env in {"1", "true", "yes", "on"}
+else:
+    # If you explicitly set PHOTO_ROOT, assume you likely want recursion.
+    PHOTO_RECURSIVE = bool(PHOTO_ROOT)
+
+_photo_readonly_env = os.environ.get("PHOTO_READONLY", "").strip().lower()
+if _photo_readonly_env:
+    PHOTO_READONLY = _photo_readonly_env in {"1", "true", "yes", "on"}
+else:
+    # Default to read-only when pointing at an external folder.
+    PHOTO_READONLY = bool(PHOTO_ROOT) and (PHOTO_DIR.resolve() != UPLOAD_DIR.resolve())
+
+PHOTO_SKIP_HIDDEN = os.environ.get("PHOTO_SKIP_HIDDEN", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+try:
+    PHOTO_SCAN_TTL = int(os.environ.get("PHOTO_SCAN_TTL", "30").strip() or "30")
+except Exception:
+    PHOTO_SCAN_TTL = 30
+PHOTO_SCAN_TTL = max(0, min(PHOTO_SCAN_TTL, 3600))
 
 MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 ALLOWED = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
@@ -32,6 +60,7 @@ ADMIN_PIN  = os.environ.get("ADMIN_PIN", "").strip()
 VIEW_PIN   = os.environ.get("VIEW_PIN", "").strip()
 SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
 ALLOW_UPLOAD = os.environ.get("ALLOW_UPLOAD", "0").strip().lower() in {"1","true","yes","on"}
+ALLOW_UPLOAD_EFFECTIVE = ALLOW_UPLOAD and (PHOTO_DIR.resolve() == UPLOAD_DIR.resolve()) and (not PHOTO_READONLY)
 
 # Simple metadata cache so we don't parse EXIF on every request
 METADB_PATH = BASE / "metadata_index.json"
@@ -167,15 +196,105 @@ def _exif_taken_ms(path: Path) -> Optional[int]:
         return None
     return None
 
-def _get_taken_ms_cached(p: Path) -> Optional[int]:
-    fn = p.name
-    rec = _metadb.get(fn)
+def _get_taken_ms_cached(key: str, p: Path) -> tuple[Optional[int], bool]:
+    rec = _metadb.get(key)
     if isinstance(rec, dict) and "taken_ms" in rec:
-        return rec.get("taken_ms")
+        return rec.get("taken_ms"), False
     taken = _exif_taken_ms(p)
-    _metadb[fn] = {"taken_ms": taken}
-    _save_metadb()
-    return taken
+    _metadb[key] = {"taken_ms": taken}
+    return taken, True
+
+_scan_cache: dict[tuple[str, bool, bool], dict] = {}
+
+def _clean_rel_dir(s: str) -> str:
+    s = (s or "").strip().replace("\\", "/")
+    if not s:
+        return ""
+    while s.startswith("/"):
+        s = s[1:]
+    if s in (".", "./"):
+        return ""
+    if "/../" in f"/{s}/" or s.startswith("../") or s.endswith("/..") or s == "..":
+        return ""
+    if s.startswith("./"):
+        s = s[2:]
+    return s.strip("/")
+
+def _iter_photo_files(rel_dir: str = "") -> list[tuple[str, Path]]:
+    """Return [(rel_key, full_path)] for allowed image files under PHOTO_DIR (optionally scoped to rel_dir)."""
+    items: list[tuple[str, Path]] = []
+    rel_dir = _clean_rel_dir(rel_dir)
+    root = (PHOTO_DIR / rel_dir) if rel_dir else PHOTO_DIR
+    if not root.exists() or not root.is_dir():
+        return items
+
+    cache_key = (rel_dir, bool(PHOTO_RECURSIVE), bool(PHOTO_SKIP_HIDDEN))
+    now = time.time()
+    cached = _scan_cache.get(cache_key)
+    if cached and PHOTO_SCAN_TTL > 0 and (now - float(cached.get("at", 0))) <= PHOTO_SCAN_TTL:
+        return list(cached.get("items") or [])
+
+    def _is_hidden_rel(rel_posix: str) -> bool:
+        if not rel_posix:
+            return False
+        for part in rel_posix.split("/"):
+            if part.startswith("."):
+                return True
+        return False
+
+    if PHOTO_RECURSIVE:
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            if PHOTO_SKIP_HIDDEN:
+                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            for fn in filenames:
+                if PHOTO_SKIP_HIDDEN and fn.startswith("."):
+                    continue
+                p = Path(dirpath) / fn
+                if not p.is_file():
+                    continue
+                if p.suffix.lower() not in ALLOWED:
+                    continue
+                try:
+                    rel = p.relative_to(root).as_posix()
+                except Exception:
+                    rel = p.name
+                if PHOTO_SKIP_HIDDEN and _is_hidden_rel(rel):
+                    continue
+                rel_key = f"{rel_dir}/{rel}".strip("/") if rel_dir else rel
+                items.append((rel_key, p))
+    else:
+        for p in root.iterdir():
+            if not p.is_file():
+                continue
+            if PHOTO_SKIP_HIDDEN and p.name.startswith("."):
+                continue
+            if p.suffix.lower() not in ALLOWED:
+                continue
+            rel_key = f"{rel_dir}/{p.name}".strip("/") if rel_dir else p.name
+            items.append((rel_key, p))
+
+    if PHOTO_SCAN_TTL > 0:
+        _scan_cache[cache_key] = {"at": now, "items": items}
+    return items
+
+def _list_subdirs(rel_base: str = "") -> list[str]:
+    rel_base = _clean_rel_dir(rel_base)
+    base = (PHOTO_DIR / rel_base) if rel_base else PHOTO_DIR
+    if not base.exists() or not base.is_dir():
+        return []
+    out: list[str] = []
+    try:
+        for p in base.iterdir():
+            if not p.is_dir():
+                continue
+            if PHOTO_SKIP_HIDDEN and p.name.startswith("."):
+                continue
+            rel = f"{rel_base}/{p.name}".strip("/") if rel_base else p.name
+            out.append(rel)
+    except Exception:
+        return []
+    out.sort(key=lambda s: s.lower())
+    return out
 
 # ---------- HTML ----------
 UPLOAD_DISABLED_HTML = """<!doctype html>
@@ -200,6 +319,7 @@ UPLOAD_DISABLED_HTML = """<!doctype html>
   <div class="note">
     <strong>Uploads are closed.</strong>
     <p>You can still view the wall and download all photos as a ZIP archive.</p>
+    <p class="muted">{{SOURCE_NOTE}}</p>
     <div class="actions">
       <a class="btn" href="/wall">Open the photo wall</a>
       <a class="btn" href="/slideshow">Start slideshow</a>
@@ -369,7 +489,17 @@ WALL_HTML = """<!doctype html>
 
   .meta{padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px}
   .pill{font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid #27304a;color:#c7d0e8}
-  button,select,label,input[type=checkbox]{background:#161922;border:1px solid #242837;color:var(--fg);padding:8px 10px;border-radius:10px;cursor:pointer}
+  button,select,label,input[type=checkbox],input[type=text]{background:#161922;border:1px solid #242837;color:var(--fg);padding:8px 10px;border-radius:10px;cursor:pointer}
+  input[type=text]{cursor:text}
+  details{border:1px solid #242837;border-radius:10px;padding:6px 10px}
+  details > summary{cursor:pointer;list-style:none}
+  details > summary::-webkit-details-marker{display:none}
+  .folderbox{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;max-width:min(920px, 92vw)}
+  .folderlist{max-height:260px;overflow:auto;border:1px solid #242837;border-radius:10px;padding:8px;min-width:260px;background:#0f1219}
+  .folderrow{display:flex;gap:8px;align-items:center;padding:4px 2px}
+  .folderrow input{margin:0}
+  .chipbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .chip{border:1px solid #27304a;border-radius:999px;padding:4px 8px;font-size:12px;color:#c7d0e8}
   label.chk{display:inline-flex;align-items:center;gap:6px;padding:6px 8px}
   a{color:#8ab4ff}
   .viewer{position:fixed;inset:0;background:rgba(0,0,0,.95);display:none;align-items:center;justify-content:center;z-index:1000;touch-action:none; overscroll-behavior:contain;}
@@ -388,6 +518,20 @@ WALL_HTML = """<!doctype html>
   </div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <a href="/" style="margin-right:8px" class="muted">Home</a>
+    <details id="folderDetails">
+      <summary class="muted">Folders</summary>
+      <div class="folderbox" style="margin-top:8px">
+        <div>
+          <div class="muted" style="margin-bottom:6px">Pick one or more folders under the photo root.</div>
+          <div class="chipbar" style="margin-bottom:8px">
+            <span class="chip" id="selCount">Selected: 0</span>
+            <button id="clearFolders" type="button">Clear</button>
+          </div>
+          <input id="folderSearch" type="text" placeholder="Filter folders..." style="min-width:260px">
+        </div>
+        <div class="folderlist" id="folderList" aria-label="Folder list"></div>
+      </div>
+    </details>
     <label class="muted" for="sort">Sort by</label>
     <select id="sort">
       <option value="upload">Uploaded</option>
@@ -439,6 +583,11 @@ const sortSel   = document.getElementById('sort');
 const orderSel  = document.getElementById('order');
 const layoutSel = document.getElementById('layout');
 const uniformCb = document.getElementById('uniform');
+const folderDetails = document.getElementById('folderDetails');
+const folderListEl  = document.getElementById('folderList');
+const folderSearch  = document.getElementById('folderSearch');
+const clearFoldersBtn = document.getElementById('clearFolders');
+const selCountEl = document.getElementById('selCount');
 const btnL = document.getElementById('scrollL');
 const btnR = document.getElementById('scrollR');
 
@@ -451,15 +600,24 @@ let sort   = P.get('sort')   || 'upload';
 let order  = P.get('order')  || 'desc';
 let layout = P.get('layout') || localStorage.getItem('pw_layout') || 'columns';
 let uniform = (P.get('tiles') || localStorage.getItem('pw_uniform') || '0') === '1';
+let dirs = [];
+try {
+  const fromQs = (P.get('dirs')||'').split(',').map(s=>s.trim()).filter(Boolean);
+  const fromStore = JSON.parse(localStorage.getItem('pw_dirs')||'[]');
+  dirs = (fromQs.length ? fromQs : (Array.isArray(fromStore) ? fromStore : [])).filter(Boolean);
+} catch(e){ dirs = []; }
 
 sortSel.value = sort;
 orderSel.value = order;
 layoutSel.value = layout;
 uniformCb.checked = uniform;
+selCountEl.textContent = 'Selected: ' + dirs.length;
 
 function setStatus(t){ statusEl.textContent = t; }
 function qsUpdate(){
   const u = new URL(location.href);
+  if (dirs.length) u.searchParams.set('dirs', dirs.join(',')); else u.searchParams.delete('dirs');
+  u.searchParams.delete('dir');
   u.searchParams.set('sort',  sort);
   u.searchParams.set('order', order);
   u.searchParams.set('layout', layout);
@@ -478,8 +636,60 @@ orderSel.onchange  = ()=>{ order = orderSel.value; qsUpdate(); load(); };
 layoutSel.onchange = ()=>{ layout = layoutSel.value; localStorage.setItem('pw_layout', layout); applyLayout(); qsUpdate(); };
 uniformCb.onchange = ()=>{ uniform = uniformCb.checked; localStorage.setItem('pw_uniform', uniform ? '1':'0'); applyLayout(); qsUpdate(); };
 
+function setDirs(next){
+  dirs = (next||[]).map(s=>(s||'').trim().replace(/^\\/+/, '').replace(/\\\\/g,'/').replace(/^\\.\\//,'').replace(/\\/+$/,'')).filter(Boolean);
+  dirs = Array.from(new Set(dirs)).sort((a,b)=> a.localeCompare(b));
+  localStorage.setItem('pw_dirs', JSON.stringify(dirs));
+  selCountEl.textContent = 'Selected: ' + dirs.length;
+  qsUpdate();
+}
+
+clearFoldersBtn.onclick = ()=>{ setDirs([]); renderFolderList(); load(); };
+
+async function fetchDirs(){
+  try{
+    const r = await fetch('/dirs?limit=2000', {cache:'no-store'});
+    if(!r.ok) return [];
+    const d = await r.json();
+    return d.dirs || [];
+  }catch(e){ return []; }
+}
+
+let allDirs = [];
+function renderFolderList(){
+  const q = (folderSearch.value||'').trim().toLowerCase();
+  const vis = q ? allDirs.filter(d=> d.toLowerCase().includes(q)) : allDirs;
+  folderListEl.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  for(const d of vis){
+    const row = document.createElement('label');
+    row.className = 'folderrow';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = dirs.includes(d);
+    cb.onchange = ()=>{
+      if(cb.checked) setDirs(dirs.concat([d]));
+      else setDirs(dirs.filter(x=>x!==d));
+      load();
+    };
+    const txt = document.createElement('span');
+    txt.textContent = d;
+    row.append(cb, txt);
+    frag.append(row);
+  }
+  folderListEl.append(frag);
+}
+
+folderSearch.oninput = ()=> renderFolderList();
+
+(async function initFolders(){
+  allDirs = await fetchDirs();
+  renderFolderList();
+})();
+
 async function fetchList(){
-  const r = await fetch(`/list?limit=400&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}`, {cache:'no-store'});
+  const dirsPart = dirs.length ? `&dirs=${encodeURIComponent(dirs.join(','))}` : '';
+  const r = await fetch(`/list?limit=400&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}${dirsPart}`, {cache:'no-store'});
   const d = await r.json();
   return d.items || [];
 }
@@ -616,6 +826,8 @@ let shuffle  = (P.get('shuffle')==='1');
 let showHint = (P.get('hint')!=='0');
 let sort = (P.get('sort')==='taken') ? 'taken' : 'upload';
 let order = (P.get('order')==='asc') ? 'asc' : 'desc';
+let dir = (P.get('dir')||'').replace(/^\\/+/, '').replace(/\\\\/g,'/').trim();
+let dirs = (P.get('dirs')||'').split(',').map(s=>s.trim()).filter(Boolean);
 
 let paused=false, idx=-1, items=[], timer=null, hideMouseTimer=null, loading=false;
 
@@ -647,7 +859,8 @@ function prev(){ if (!items.length) return; show(idx-1); }
 async function refreshList(){
   if (loading) return; loading = true;
   try{
-    const r = await fetch(`/list?limit=400&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}`, {cache:'no-store'});
+    const dirsPart = dirs.length ? `&dirs=${encodeURIComponent(dirs.join(','))}` : (dir ? `&dir=${encodeURIComponent(dir)}` : '');
+    const r = await fetch(`/list?limit=400&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}${dirsPart}`, {cache:'no-store'});
     const d = await r.json();
     const incoming = d.items||[];
     if (!items.length){ items = incoming.slice(); if (shuffle) items.sort(()=>Math.random()-0.5); idx = 0; show(idx); return; }
@@ -727,6 +940,7 @@ ADMIN_HTML = """<!doctype html>
 const grid=document.getElementById('grid'), statusEl=document.getElementById('status');
 const pinEl=document.getElementById('pin');
 let known=new Set(), auto=true, timer=null, admin={pin: localStorage.getItem('pw_admin_pin')||''};
+let READONLY = false;
 pinEl.value = admin.pin;
 
 document.getElementById('save').onclick = ()=>{ admin.pin=pinEl.value||''; localStorage.setItem('pw_admin_pin', admin.pin); };
@@ -738,10 +952,16 @@ function setStatus(t){ statusEl.textContent=t; }
 async function fetchList(){
   const r = await fetch('/list?limit=400', {cache:'no-store'});
   const d = await r.json();
-  return (d.items||[]).sort((a,b)=> b.ts - a.ts);
+  READONLY = !!d.readonly;
+  const items = (d.items||[]).sort((a,b)=> b.ts - a.ts);
+  if (READONLY){
+    setStatus('Read-only mode: deletes are disabled');
+  }
+  return items;
 }
 
 async function doDelete(name,card){
+  if(READONLY){ alert('Read-only mode: deletes are disabled'); return; }
   if(!admin.pin){ alert('Enter the admin PIN first'); return; }
   const r = await fetch('/delete',{method:'POST',
     headers:{'Content-Type':'application/json','X-Admin-Pin': admin.pin},
@@ -749,6 +969,7 @@ async function doDelete(name,card){
   });
   if(r.status===204){ card.remove(); known.delete(name); setStatus('Deleted '+name); }
   else if(r.status===403){ alert('Incorrect PIN'); }
+  else if(r.status===409){ alert('Read-only mode: deletes are disabled'); }
   else { alert('Delete failed'); }
 }
 
@@ -758,7 +979,13 @@ function render(items){
     if(known.has(it.name)) continue;
     const card=document.createElement('article'); card.className='card';
     const btn=document.createElement('button'); btn.className='del'; btn.textContent='×'; btn.title='Delete';
-    btn.onclick=()=> doDelete(it.name, card);
+    if (READONLY){
+      btn.disabled = true;
+      btn.title = 'Read-only mode';
+      btn.style.opacity = '0.5';
+    } else {
+      btn.onclick=()=> doDelete(it.name, card);
+    }
     const img=document.createElement('img'); img.loading='lazy'; img.decoding='async'; img.alt=it.name; img.src=it.url+'?v='+it.ts;
     const meta=document.createElement('div'); meta.className='meta';
     const ts=document.createElement('div'); ts.className='pill'; ts.textContent=new Date(it.ts).toLocaleString();
@@ -810,14 +1037,29 @@ def root():
     if not _has_view_access():
         html = LOCKED_HTML
         return Response(html, mimetype="text/html")
-    html = UPLOAD_FORM_HTML if ALLOW_UPLOAD else UPLOAD_DISABLED_HTML
+    if ALLOW_UPLOAD_EFFECTIVE:
+        html = UPLOAD_FORM_HTML
+    else:
+        note = f"Source: {PHOTO_DIR}"
+        if PHOTO_RECURSIVE:
+            note += " (recursive)"
+        if PHOTO_READONLY:
+            note += " · read-only"
+        if PHOTO_DIR.resolve() != UPLOAD_DIR.resolve():
+            note += " · ZIP download is for uploads/ only"
+        html = UPLOAD_DISABLED_HTML.replace("{{SOURCE_NOTE}}", note)
+        if PHOTO_DIR.resolve() != UPLOAD_DIR.resolve():
+            html = html.replace('<a class="btn" href="/download">Download ZIP</a>', "")
     return Response(html, mimetype="text/html")
 
 @app.get("/wall")
 def wall():
     if not _has_view_access():
         return Response(LOCKED_HTML, mimetype="text/html")
-    return Response(WALL_HTML, mimetype="text/html")
+    html = WALL_HTML
+    if PHOTO_DIR.resolve() != UPLOAD_DIR.resolve():
+        html = html.replace('<a class="muted" href="/download" title="Download all photos as a ZIP archive">Download ZIP</a>', "")
+    return Response(html, mimetype="text/html")
 
 @app.get("/slideshow")
 def slideshow():
@@ -828,6 +1070,24 @@ def slideshow():
 @app.get("/admin")
 def admin():
     return Response(ADMIN_HTML, mimetype="text/html")
+
+@app.get("/dirs")
+def list_dirs():
+    if not _has_view_access():
+        resp = jsonify({"error": "forbidden"})
+        resp.status_code = 403
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+    base = _clean_rel_dir(request.args.get("base") or "")
+    try:
+        limit = int(request.args.get("limit", "300"))
+    except ValueError:
+        limit = 300
+    limit = max(1, min(limit, 5000))
+    dirs = _list_subdirs(base)[:limit]
+    resp = jsonify({"base": base, "dirs": dirs, "photo_root": str(PHOTO_DIR), "readonly": bool(PHOTO_READONLY), "recursive": bool(PHOTO_RECURSIVE)})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 @app.get("/list")
 def list_files():
@@ -852,41 +1112,74 @@ def list_files():
     before = request.args.get("before")
     before_ms = int(before) if (before and before.isdigit()) else None
 
+    rel_dir = _clean_rel_dir(request.args.get("dir") or "")
+    dirs_csv = (request.args.get("dirs") or "").strip()
+    dirs: list[str] = []
+    if dirs_csv:
+        for part in dirs_csv.split(","):
+            d = _clean_rel_dir(part)
+            if d:
+                dirs.append(d)
+    for d in request.args.getlist("dir"):
+        d2 = _clean_rel_dir(d)
+        if d2:
+            dirs.append(d2)
+    # Back-compat: if only dir is provided, use it. If dirs is provided, it wins.
+    if dirs:
+        rel_dirs = sorted(set(dirs), key=lambda s: s.lower())
+    elif rel_dir:
+        rel_dirs = [rel_dir]
+    else:
+        rel_dirs = [""]
+
     items = []
-    for p in UPLOAD_DIR.iterdir():
-        if not p.is_file():
-            continue
-        ext = p.suffix.lower()
-        if ext not in ALLOWED:
-            continue
-        st = p.stat()
-        try:
-            ts_upload = int(p.name.split("-")[0])
-        except Exception:
-            ts_upload = int(st.st_mtime * 1000)
-        if before_ms and ts_upload >= before_ms:
-            continue
-        taken_ms = _get_taken_ms_cached(p)
-        cap = (p.stem.split("__",1)[1].replace("_"," ").strip() if "__" in p.stem else "")[:80]
-        items.append({
-            "name": p.name,
-            "url": f"/uploads/{p.name}",
-            "ts": ts_upload,
-            "tk": taken_ms,
-            "cap": cap
-        })
+    dirty = False
+    seen: set[str] = set()
+    for one_dir in rel_dirs:
+        photos = _iter_photo_files(one_dir)
+        for rel, p in photos:
+            if rel in seen:
+                continue
+            seen.add(rel)
+            try:
+                st = p.stat()
+            except Exception:
+                continue
+            base_name = Path(rel).name
+            try:
+                ts_upload = int(base_name.split("-")[0])
+            except Exception:
+                ts_upload = int(st.st_mtime * 1000)
+            if before_ms and ts_upload >= before_ms:
+                continue
+
+            taken_ms = None
+            if sort_by == "taken":
+                taken_ms, touched = _get_taken_ms_cached(rel, p)
+                dirty = dirty or touched
+
+            cap = (p.stem.split("__",1)[1].replace("_"," ").strip() if "__" in p.stem else "")[:80]
+            items.append({
+                "name": rel,
+                "url": "/uploads/" + quote(rel, safe="/"),
+                "ts": ts_upload,
+                "tk": taken_ms,
+                "cap": cap
+            })
 
     key_name = "tk" if sort_by == "taken" else "ts"
     items.sort(key=lambda it: (it[key_name] if it.get(key_name) is not None else it["ts"]), reverse=desc)
     items = items[:limit]
-    resp = jsonify({"items": items})
+    if dirty:
+        _save_metadb()
+    resp = jsonify({"items": items, "readonly": bool(PHOTO_READONLY), "photo_root": str(PHOTO_DIR), "recursive": bool(PHOTO_RECURSIVE), "dir": rel_dir, "dirs": [d for d in rel_dirs if d]})
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
 @app.post("/upload")
 def upload():
     # Uploads disabled hard unless ALLOW_UPLOAD is set
-    if not ALLOW_UPLOAD:
+    if not ALLOW_UPLOAD_EFFECTIVE:
         return ("Uploads are disabled", 403)
     if UPLOAD_PIN and request.headers.get("x-upload-pin","") != UPLOAD_PIN:
         return ("Forbidden", 403)
@@ -919,6 +1212,8 @@ def upload():
 def delete():
     if not ADMIN_PIN or request.headers.get("x-admin-pin", "") != ADMIN_PIN:
         return ("Forbidden", 403)
+    if PHOTO_READONLY or (PHOTO_DIR.resolve() != UPLOAD_DIR.resolve()):
+        return ("Read-only mode", 409)
     data = request.get_json(force=True, silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name or "/" in name or ".." in name:
@@ -938,20 +1233,22 @@ def rescan_metadata():
     if not ADMIN_PIN or request.headers.get("x-admin-pin", "") != ADMIN_PIN:
         return ("Forbidden", 403)
     count = 0
-    for p in UPLOAD_DIR.iterdir():
-        if not p.is_file():
-            continue
-        if p.suffix.lower() not in ALLOWED:
-            continue
-        _get_taken_ms_cached(p)
+    dirty = False
+    rel_dir = _clean_rel_dir(request.args.get("dir") or "")
+    for rel, p in _iter_photo_files(rel_dir):
+        taken_ms, touched = _get_taken_ms_cached(rel, p)
+        dirty = dirty or touched
         count += 1
-    _save_metadb()
-    return jsonify({"rescanned": count, "cached": len(_metadb)})
+    if dirty:
+        _save_metadb()
+    return jsonify({"rescanned": count, "cached": len(_metadb), "dir": rel_dir})
 
 @app.get("/download")
 def download_zip():
     if not _has_view_access():
         return ("Forbidden", 403)
+    if PHOTO_DIR.resolve() != UPLOAD_DIR.resolve():
+        return ("ZIP download is only supported for uploads/ in this mode", 409)
     """Create a ZIP of all images in /uploads and return it as attachment.
        The ZIP is written to a temp dir under BASE and deleted after response.
     """
@@ -988,7 +1285,7 @@ def download_zip():
 
 @app.get("/uploads/<path:filename>")
 def serve_upload(filename):
-    resp = send_from_directory(UPLOAD_DIR, filename, conditional=True, etag=True)
+    resp = send_from_directory(PHOTO_DIR, filename, conditional=True, etag=True)
     resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
     return resp
 

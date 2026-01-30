@@ -33,6 +33,11 @@ Environment variables read at startup:
 - `UPLOAD_PIN` – optional header `X-Upload-Pin` on `/upload`.
 - `VIEW_PIN` – gates `/`, `/wall`, `/slideshow`, `/list`, and `/download`; users must submit the PIN once per browser session.
 - `ALLOW_UPLOAD` – set to `1/true/on` to enable uploads; otherwise `/upload` returns HTTP 403.
+- `PHOTO_ROOT` – optional folder to *browse* instead of `uploads/` (supports absolute paths like `/mnt/n/erik/dropbox/storage/pics/`). When set, the app defaults to recursive scanning and becomes read-only by default.
+- `PHOTO_RECURSIVE` – set to `1/true/on` to scan `PHOTO_ROOT` recursively (default: `1` when `PHOTO_ROOT` is set, else `0`).
+- `PHOTO_READONLY` – set to `0/false/off` to allow deletes/uploads when `PHOTO_ROOT` points at `uploads/` (default: read-only when `PHOTO_ROOT` points elsewhere).
+- `PHOTO_SKIP_HIDDEN` – set to `0/false/off` to include dotfiles/dotfolders (default: `1`).
+- `PHOTO_SCAN_TTL` – cache filesystem scans for N seconds to reduce load on large trees (default `30`, set to `0` to disable).
 - `PORT` – listen port when running the Flask development server (`default=8081`). Gunicorn users can pick any port in their unit file.
 
 ## Directory layout
@@ -81,7 +86,7 @@ journalctl --user -u photowall -f
 | `/delete` | POST | JSON body `{"name": "filename"}`; header `X-Admin-Pin`. |
 | `/rescan` | POST | Rebuild EXIF cache; header `X-Admin-Pin`. |
 | `/list` | GET | JSON listing, supports `limit`, `order`, `sort`, `before`. |
-| `/download` | GET | Streams a ZIP archive of all uploaded files. |
+| `/download` | GET | Streams a ZIP archive of `uploads/` (disabled when browsing an external `PHOTO_ROOT`). |
 | `/uploads/<filename>` | GET | Serves stored assets with aggressive caching. |
 
 ## Next steps
