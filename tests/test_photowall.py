@@ -106,6 +106,14 @@ def test_admin_page_links_admin_javascript(client):
     assert 'src="/static/admin.js"' in html
 
 
+def test_slideshow_page_links_slideshow_javascript(client):
+    response = client.get("/slideshow")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'src="/static/slideshow.js"' in html
+
+
 def test_upload_form_javascript_is_served(client):
     response = client.get("/static/upload_form.js")
 
@@ -127,6 +135,18 @@ def test_admin_javascript_is_served(client):
     assert "/delete" in js
     assert "X-Admin-Pin" in js
     assert "localStorage" in js
+
+
+def test_slideshow_javascript_is_served(client):
+    response = client.get("/static/slideshow.js")
+
+    assert response.status_code == 200
+    assert response.mimetype in {"application/javascript", "text/javascript"}
+    js = response.get_data(as_text=True)
+    assert "/list" in js
+    assert "setInterval" in js
+    assert "next" in js
+    assert "prev" in js
 
 
 def test_locked_view_page_links_locked_css(client, monkeypatch):
