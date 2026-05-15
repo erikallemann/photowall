@@ -1,0 +1,17 @@
+  body{margin:0;background:#0b0c10;color:#f5f7fb;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  main{max-width:560px;margin:40px auto;padding:0 16px}
+  h1{margin:0 0 10px 0}
+  .card{background:#0f1219;border:1px solid #27304a;border-radius:14px;padding:18px}
+  input,button{background:#161922;border:1px solid #242837;color:#f5f7fb;padding:10px 12px;border-radius:12px;font:inherit}
+  form{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .muted{color:#9aa3b2}
+  .err{color:#ff8a80;margin-top:8px}
+  a{color:#8ab4ff}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  label{display:flex;gap:6px;align-items:center}
+  input[type=password]{min-width:220px}
+  .hint{font-size:14px;margin-top:8px}
+  .nav{display:flex;gap:12px;margin-top:12px}
+  .pill{font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid #27304a;color:#c7d0e8}
+  .ok{color:#8ab4ff}
+  .sp{flex:1}

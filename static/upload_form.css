@@ -1,0 +1,15 @@
+  body{margin:0;background:#0b0c10;color:#f5f7fb;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  main{max-width:720px;margin:32px auto;padding:0 16px}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px}
+  h1{margin:0}
+  a{color:#8ab4ff}
+  form{background:#0f1219;border:1px solid #27304a;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:16px}
+  label{display:flex;flex-direction:column;gap:6px;color:#c7d0e8;font-size:14px}
+  input[type=file]{color:#f5f7fb}
+  input,textarea,button{background:#161922;border:1px solid #242837;color:#f5f7fb;padding:10px 12px;border-radius:12px;font:inherit}
+  button{cursor:pointer;align-self:flex-start}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .muted{color:#9aa3b2;font-size:14px}
+  #status{margin-top:8px;font-size:14px;min-height:18px}
+  #status.error{color:#ff8a80}
+  #status.ok{color:#8ab4ff}
