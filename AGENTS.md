@@ -2,8 +2,6 @@
 
 Purpose: lightweight Flask photo wall for events.
 
-Repository path: `/home/erik/git/personal/photowall`
-
 # Agent workflow
 
 This repository is often edited with AI coding agents. Keep changes small, focused, and reviewable.
