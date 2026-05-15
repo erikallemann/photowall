@@ -69,7 +69,7 @@ try:
 except Exception:
     _metadb = {}
 
-app = Flask(__name__, static_url_path="", static_folder=str(BASE))
+app = Flask(__name__, static_folder=str(BASE / "static"))
 app.secret_key = (SECRET_KEY or ADMIN_PIN or UPLOAD_PIN or secrets.token_hex(16))
 
 # ---------- Helpers ----------
