@@ -95,6 +95,18 @@ def test_upload_enabled_home_page_links_upload_form_css(client, monkeypatch):
     html = response.get_data(as_text=True)
     assert '<form id="uploadForm">' in html
     assert 'href="/static/upload_form.css"' in html
+    assert 'src="/static/upload_form.js"' in html
+
+
+def test_upload_form_javascript_is_served(client):
+    response = client.get("/static/upload_form.js")
+
+    assert response.status_code == 200
+    assert response.mimetype in {"application/javascript", "text/javascript"}
+    js = response.get_data(as_text=True)
+    assert "fetch('/upload'" in js
+    assert "X-Upload-Pin" in js
+    assert "Upload successful!" in js
 
 
 def test_locked_view_page_links_locked_css(client, monkeypatch):
