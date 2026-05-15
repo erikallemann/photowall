@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Upload Photos</title>
+<style>
+  body{margin:0;background:#0b0c10;color:#f5f7fb;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  main{max-width:720px;margin:32px auto;padding:0 16px}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px}
+  h1{margin:0}
+  a{color:#8ab4ff}
+  form{background:#0f1219;border:1px solid #27304a;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:16px}
+  label{display:flex;flex-direction:column;gap:6px;color:#c7d0e8;font-size:14px}
+  input[type=file]{color:#f5f7fb}
+  input,textarea,button{background:#161922;border:1px solid #242837;color:#f5f7fb;padding:10px 12px;border-radius:12px;font:inherit}
+  button{cursor:pointer;align-self:flex-start}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .muted{color:#9aa3b2;font-size:14px}
+  #status{margin-top:8px;font-size:14px;min-height:18px}
+  #status.error{color:#ff8a80}
+  #status.ok{color:#8ab4ff}
+</style></head>
+<body>
+<main>
+  <header>
+    <h1>Photowall</h1>
+    <nav class="actions">
+      <a class="muted" href="/wall">Wall</a>
+      <a class="muted" href="/slideshow">Slideshow</a>
+      <a class="muted" href="/download">Download ZIP</a>
+    </nav>
+  </header>
+  <form id="uploadForm">
+    <p class="muted">Choose a photo, add an optional caption, and enter the upload PIN if required. Max 10&nbsp;MB. Accepted formats: JPG/PNG/GIF/WebP.</p>
+    <label>Photo
+      <input id="file" name="file" type="file" accept="image/*" required>
+    </label>
+    <label>Caption (optional, 40 characters)
+      <input id="caption" name="caption" maxlength="40" placeholder="e.g. Couple on stage">
+    </label>
+    <label>PIN (if required)
+      <input id="pin" maxlength="64" autocomplete="off" placeholder="Enter upload PIN">
+    </label>
+    <button type="submit">Upload</button>
+    <div id="status"></div>
+  </form>
+</main>
+<script>
+const form = document.getElementById('uploadForm');
+const fileInput = document.getElementById('file');
+const captionInput = document.getElementById('caption');
+const pinInput = document.getElementById('pin');
+const statusEl = document.getElementById('status');
+
+function setStatus(text, cls){
+  statusEl.textContent = text;
+  statusEl.className = cls || '';
+}
+
+form.addEventListener('submit', async (ev)=>{
+  ev.preventDefault();
+  const file = fileInput.files[0];
+  if(!file){
+    setStatus('Select a photo first.', 'error');
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', file);
+  const caption = captionInput.value.trim();
+  if(caption) fd.append('caption', caption);
+
+  const headers = {};
+  const pin = pinInput.value.trim();
+  if(pin) headers['X-Upload-Pin'] = pin;
+
+  setStatus('Uploading...', '');
+  try{
+    const res = await fetch('/upload', {method:'POST', body: fd, headers});
+    if(res.status === 201){
+      setStatus('Upload successful!', 'ok');
+      form.reset();
+    } else if(res.status === 403){
+      setStatus('Incorrect PIN or uploads disabled.', 'error');
+    } else if(res.status === 413){
+      setStatus('File is too large (max 10 MB).', 'error');
+    } else {
+      setStatus('Upload failed ('+res.status+').', 'error');
+    }
+  } catch(err){
+    setStatus('Network error, please try again.', 'error');
+  }
+});
+</script>
+</body></html>
