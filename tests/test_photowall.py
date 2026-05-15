@@ -1,0 +1,124 @@
+import io
+import zipfile
+
+import pytest
+from PIL import Image
+
+import photowall
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    metadb_path = tmp_path / "metadata_index.json"
+
+    monkeypatch.setattr(photowall, "UPLOAD_DIR", upload_dir)
+    monkeypatch.setattr(photowall, "PHOTO_DIR", upload_dir)
+    monkeypatch.setattr(photowall, "PHOTO_READONLY", False)
+    monkeypatch.setattr(photowall, "PHOTO_RECURSIVE", False)
+    monkeypatch.setattr(photowall, "PHOTO_SCAN_TTL", 0)
+    monkeypatch.setattr(photowall, "ALLOW_UPLOAD", False)
+    monkeypatch.setattr(photowall, "ALLOW_UPLOAD_EFFECTIVE", False)
+    monkeypatch.setattr(photowall, "UPLOAD_PIN", "")
+    monkeypatch.setattr(photowall, "VIEW_PIN", "")
+    monkeypatch.setattr(photowall, "METADB_PATH", metadb_path)
+    monkeypatch.setattr(photowall, "_metadb", {})
+    monkeypatch.setattr(photowall, "_scan_cache", {})
+
+    photowall.app.config.update(TESTING=True)
+    with photowall.app.test_client() as test_client:
+        yield test_client
+
+
+def _small_jpeg_bytes() -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (2, 2), color=(255, 0, 0)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def _seed_image(name: str, data: bytes | None = None) -> None:
+    (photowall.UPLOAD_DIR / name).write_bytes(data or _small_jpeg_bytes())
+
+
+def test_home_wall_and_slideshow_render(client):
+    assert client.get("/").status_code == 200
+    assert client.get("/wall").status_code == 200
+    assert client.get("/slideshow").status_code == 200
+
+
+def test_list_returns_json_items(client):
+    _seed_image("1700000000000-abcdef-party.jpg")
+
+    response = client.get("/list")
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    data = response.get_json()
+    assert data["items"] == [
+        {
+            "name": "1700000000000-abcdef-party.jpg",
+            "url": "/uploads/1700000000000-abcdef-party.jpg",
+            "ts": 1700000000000,
+            "tk": None,
+            "cap": "",
+        }
+    ]
+
+
+def test_uploads_are_disabled_by_default(client):
+    response = client.post(
+        "/upload",
+        data={"file": (io.BytesIO(_small_jpeg_bytes()), "party.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 403
+    assert list(photowall.UPLOAD_DIR.iterdir()) == []
+
+
+def test_upload_can_be_enabled_and_accepts_small_valid_image(client, monkeypatch):
+    monkeypatch.setattr(photowall, "ALLOW_UPLOAD", True)
+    monkeypatch.setattr(photowall, "ALLOW_UPLOAD_EFFECTIVE", True)
+
+    response = client.post(
+        "/upload",
+        data={
+            "caption": "hello there",
+            "file": (io.BytesIO(_small_jpeg_bytes()), "party.jpg"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 201
+    saved = list(photowall.UPLOAD_DIR.iterdir())
+    assert len(saved) == 1
+    assert saved[0].suffix == ".jpg"
+    assert "__hello_there" in saved[0].stem
+
+
+def test_oversized_upload_is_rejected(client, monkeypatch):
+    monkeypatch.setattr(photowall, "ALLOW_UPLOAD", True)
+    monkeypatch.setattr(photowall, "ALLOW_UPLOAD_EFFECTIVE", True)
+
+    response = client.post(
+        "/upload",
+        data={"file": (io.BytesIO(b"x" * (photowall.MAX_BYTES + 1)), "too-big.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 413
+    assert list(photowall.UPLOAD_DIR.iterdir()) == []
+
+
+def test_download_returns_zip_for_default_uploads_folder(client):
+    _seed_image("1700000000000-abcdef-party.jpg")
+
+    response = client.get("/download")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/zip"
+    assert response.headers["Content-Disposition"].startswith("attachment;")
+
+    with zipfile.ZipFile(io.BytesIO(response.data)) as zf:
+        assert zf.namelist() == ["1700000000000-abcdef-party.jpg"]
