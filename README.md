@@ -98,4 +98,4 @@ journalctl --user -u photowall -f
 
 ## License
 
-Released under the MIT License. See `LICENSE` for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
