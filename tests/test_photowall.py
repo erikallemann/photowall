@@ -47,6 +47,67 @@ def test_home_wall_and_slideshow_render(client):
     assert client.get("/slideshow").status_code == 200
 
 
+@pytest.mark.parametrize(
+    ("path", "title", "css_path"),
+    [
+        ("/", "Upload Photos", "/static/upload_disabled.css"),
+        ("/wall", "Photo Wall", "/static/wall.css"),
+        ("/slideshow", "Slideshow", "/static/slideshow.css"),
+        ("/admin", "Admin Photowall", "/static/admin.css"),
+    ],
+)
+def test_pages_render_expected_html_and_css_links(client, path, title, css_path):
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert response.mimetype == "text/html"
+    html = response.get_data(as_text=True)
+    assert f"<title>{title}</title>" in html
+    assert f'href="{css_path}"' in html
+
+
+@pytest.mark.parametrize(
+    "css_path",
+    [
+        "/static/wall.css",
+        "/static/upload_form.css",
+        "/static/admin.css",
+        "/static/slideshow.css",
+        "/static/upload_disabled.css",
+        "/static/locked.css",
+    ],
+)
+def test_extracted_css_files_are_served(client, css_path):
+    response = client.get(css_path)
+
+    assert response.status_code == 200
+    assert response.mimetype == "text/css"
+    assert response.get_data(as_text=True).strip()
+
+
+def test_upload_enabled_home_page_links_upload_form_css(client, monkeypatch):
+    monkeypatch.setattr(photowall, "ALLOW_UPLOAD", True)
+    monkeypatch.setattr(photowall, "ALLOW_UPLOAD_EFFECTIVE", True)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert '<form id="uploadForm">' in html
+    assert 'href="/static/upload_form.css"' in html
+
+
+def test_locked_view_page_links_locked_css(client, monkeypatch):
+    monkeypatch.setattr(photowall, "VIEW_PIN", "secret")
+
+    response = client.get("/wall")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "The wall is locked." in html
+    assert 'href="/static/locked.css"' in html
+
+
 def test_list_returns_json_items(client):
     _seed_image("1700000000000-abcdef-party.jpg")
 
