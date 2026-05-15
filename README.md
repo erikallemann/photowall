@@ -44,7 +44,8 @@ Environment variables read at startup:
 
 ```
 photowall/
-├── photowall.py          # Flask app with routes, HTML, and assets
+├── photowall.py          # Flask app routes and helpers
+├── templates/            # HTML templates with inline CSS and JS
 ├── requirements.txt      # minimal dependency set
 ├── uploads/              # runtime file storage (empty placeholder)
 ├── docs/
