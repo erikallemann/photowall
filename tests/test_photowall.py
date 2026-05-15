@@ -114,6 +114,14 @@ def test_slideshow_page_links_slideshow_javascript(client):
     assert 'src="/static/slideshow.js"' in html
 
 
+def test_wall_page_links_wall_javascript(client):
+    response = client.get("/wall")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'src="/static/wall.js"' in html
+
+
 def test_upload_form_javascript_is_served(client):
     response = client.get("/static/upload_form.js")
 
@@ -145,6 +153,21 @@ def test_slideshow_javascript_is_served(client):
     js = response.get_data(as_text=True)
     assert "/list" in js
     assert "setInterval" in js
+    assert "next" in js
+    assert "prev" in js
+
+
+def test_wall_javascript_is_served(client):
+    response = client.get("/static/wall.js")
+
+    assert response.status_code == 200
+    assert response.mimetype in {"application/javascript", "text/javascript"}
+    js = response.get_data(as_text=True)
+    assert "/list" in js
+    assert "/dirs" in js
+    assert "localStorage" in js
+    assert "refresh" in js
+    assert "viewer" in js
     assert "next" in js
     assert "prev" in js
 
