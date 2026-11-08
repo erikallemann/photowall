@@ -1,4 +1,6 @@
 import io
+from html.parser import HTMLParser
+from urllib.parse import unquote
 import zipfile
 
 import pytest
@@ -257,4 +259,68 @@ def test_download_returns_zip_for_default_uploads_folder(client):
     assert response.headers["Content-Disposition"].startswith("attachment;")
 
     with zipfile.ZipFile(io.BytesIO(response.data)) as zf:
-        assert zf.namelist() == ["1700000000000-abcdef-party.jpg"]
+        assert zf.namelist() == ["1700000000000-abcdef-party.jpg", "index.html"]
+        assert zf.read("1700000000000-abcdef-party.jpg") == _small_jpeg_bytes()
+
+
+def test_download_gallery_has_local_links_and_escaped_captions(client):
+    names = [
+        '1700000000000-abcdef-party__Hello_&_"friends".jpg',
+        'special #?% café.png',
+        'photo__<img_src=x_onerror=alert(1)>.gif',
+        'javascript:photo.webp',
+    ]
+    for name in names:
+        _seed_image(name)
+    (photowall.UPLOAD_DIR / "ignored.txt").write_text("not a photo")
+    (photowall.UPLOAD_DIR / "nested").mkdir()
+
+    class GalleryParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.links = []
+            self.images = []
+            self.scripts = []
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == "a" and attrs.get("class") == "photo-link":
+                self.links.append(attrs["href"])
+            if tag == "img" and "src" in attrs:
+                self.images.append(attrs)
+            if tag == "script":
+                self.scripts.append(attrs)
+
+    response = client.get("/download")
+    with zipfile.ZipFile(io.BytesIO(response.data)) as zf:
+        assert set(zf.namelist()) == {*names, "index.html"}
+        html = zf.read("index.html").decode("utf-8")
+        parser = GalleryParser()
+        parser.feed(html)
+        assert [unquote(link[2:]) for link in parser.links] == sorted(names)
+        assert all(link.startswith("./") for link in parser.links)
+        assert [img["src"] for img in parser.images] == parser.links
+        assert all("onerror" not in img for img in parser.images)
+        assert parser.scripts == [{}]
+        assert '<img src=x onerror=alert(1)>' not in html
+        assert 'Hello &amp; &#34;friends&#34;' in html
+        assert 'fetch(' not in html
+        for name in names:
+            assert zf.read(name) == _small_jpeg_bytes()
+
+
+def test_download_empty_gallery(client):
+    response = client.get("/download")
+    with zipfile.ZipFile(io.BytesIO(response.data)) as zf:
+        assert zf.namelist() == ["index.html"]
+        assert "No photos in this export." in zf.read("index.html").decode("utf-8")
+
+
+def test_download_still_requires_view_access(client, monkeypatch):
+    monkeypatch.setattr(photowall, "VIEW_PIN", "private")
+    assert client.get("/download").status_code == 403
+
+
+def test_download_still_rejects_external_photo_root(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(photowall, "PHOTO_DIR", tmp_path / "external")
+    assert client.get("/download").status_code == 409

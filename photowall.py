@@ -17,7 +17,7 @@ import os, re, json, time, secrets, mimetypes, tempfile, zipfile
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
-from flask import Flask, request, send_from_directory, jsonify, Response, send_file, after_this_request, session, redirect, render_template
+from flask import Flask, request, send_from_directory, jsonify, Response, send_file, after_this_request, session, redirect, render_template, render_template_string
 
 # ---------- Paths & config ----------
 BASE = Path(__file__).resolve().parent
@@ -537,6 +537,140 @@ def rescan_metadata():
         _save_metadb()
     return jsonify({"rescanned": count, "cached": len(_metadb), "dir": rel_dir})
 
+OFFLINE_GALLERY_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Photowall — Event photos</title>
+<style>
+  :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+  body { margin: 0; background: #151515; color: #eee; }
+  header { max-width: 75rem; margin: auto; padding: 1.5rem; }
+  h1 { margin: 0; }
+  p { line-height: 1.5; }
+  main { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 1rem; padding: 0 1.5rem 1.5rem; max-width: 75rem; margin: auto; }
+  figure { margin: 0; background: #262626; border-radius: .5rem; overflow: hidden; }
+  figure img { width: 100%; height: 220px; object-fit: cover; display: block; }
+  figcaption { padding: .8rem; overflow-wrap: anywhere; white-space: pre-wrap; }
+  a { color: #bce0ff; }
+  a:focus-visible, button:focus-visible { outline: 3px solid #9bd0ff; outline-offset: 3px; }
+  button { font: inherit; cursor: pointer; padding: .6rem .9rem; }
+  dialog { border: 0; padding: 1rem; background: #151515; color: #eee;
+    width: min(70rem, calc(100% - 3rem)); max-height: calc(100% - 3rem); }
+  dialog::backdrop { background: #000d; }
+  dialog:fullscreen { width: 100%; height: 100%; max-height: none; box-sizing: border-box; }
+  #photo { display: block; width: 100%; height: 65vh; object-fit: contain; }
+  #caption { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .controls { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Event photos</h1>
+  <p>{{ photos|length }} photos. Select a photo to view it. Use Left/Right to browse,
+    Space to start or pause the slideshow, and Escape to close the viewer.</p>
+  <p>Keep this file alongside the photos. Everything works offline after extracting the ZIP.</p>
+</header>
+<main>
+{% for photo in photos %}
+  <figure>
+    <a class="photo-link" href="{{ photo.url }}"><img src="{{ photo.url }}"
+      loading="lazy" alt="{{ photo.caption or photo.name }}"></a>
+    <figcaption>{{ photo.caption or photo.name }}</figcaption>
+  </figure>
+{% else %}
+  <p>No photos in this export.</p>
+{% endfor %}
+</main>
+<dialog id="viewer" aria-label="Photo viewer">
+  <div class="controls">
+    <button type="button" id="previous" aria-label="Previous photo">Previous</button>
+    <button type="button" id="next" aria-label="Next photo">Next</button>
+    <button type="button" id="play" aria-pressed="false">Play slideshow</button>
+    <button type="button" id="fullscreen" hidden>Full screen</button>
+    <button type="button" id="close">Close</button>
+    <span id="position" aria-live="polite"></span>
+  </div>
+  <img id="photo" alt="" tabindex="0">
+  <p id="caption"></p>
+  <a id="original">Open original photo</a>
+</dialog>
+<script>
+(() => {
+  const links = Array.from(document.querySelectorAll('.photo-link'));
+  const viewer = document.getElementById('viewer');
+  if (typeof viewer.showModal !== 'function') return;
+  const photo = document.getElementById('photo');
+  const caption = document.getElementById('caption');
+  const play = document.getElementById('play');
+  const fullscreen = document.getElementById('fullscreen');
+  let current = 0;
+  let timer = null;
+  function show(index) {
+    current = (index + links.length) % links.length;
+    const link = links[current];
+    photo.src = link.getAttribute('href');
+    caption.textContent = link.nextElementSibling.textContent;
+    photo.alt = caption.textContent;
+    document.getElementById('original').href = link.getAttribute('href');
+    document.getElementById('position').textContent = (current + 1) + ' / ' + links.length;
+  }
+  function stop() {
+    clearInterval(timer);
+    timer = null;
+    play.textContent = 'Play slideshow';
+    play.setAttribute('aria-pressed', 'false');
+  }
+  function togglePlay() {
+    if (timer !== null) { stop(); return; }
+    timer = setInterval(() => show(current + 1), 5000);
+    play.textContent = 'Pause slideshow';
+    play.setAttribute('aria-pressed', 'true');
+  }
+  links.forEach((link, index) => link.addEventListener('click', event => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    show(index);
+    viewer.showModal();
+    photo.focus();
+  }));
+  document.getElementById('previous').onclick = () => show(current - 1);
+  document.getElementById('next').onclick = () => show(current + 1);
+  play.onclick = togglePlay;
+  function closeViewer() {
+    stop();
+    if (document.fullscreenElement === viewer) document.exitFullscreen().catch(() => {});
+    viewer.close();
+    links[current].focus();
+  }
+  document.getElementById('close').onclick = closeViewer;
+  viewer.addEventListener('cancel', event => {
+    event.preventDefault();
+    closeViewer();
+  });
+  if (viewer.requestFullscreen) {
+    fullscreen.hidden = false;
+    fullscreen.onclick = () => {
+      const request = document.fullscreenElement
+        ? document.exitFullscreen() : viewer.requestFullscreen();
+      request.catch(() => {});
+    };
+  }
+  viewer.addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft') { event.preventDefault(); show(current - 1); }
+    if (event.key === 'ArrowRight') { event.preventDefault(); show(current + 1); }
+    if (event.key === ' ' && !['BUTTON', 'A'].includes(event.target.tagName)) {
+      event.preventDefault(); togglePlay();
+    }
+  });
+})();
+</script>
+</body>
+</html>
+"""
+
 @app.get("/download")
 def download_zip():
     if not _has_view_access():
@@ -550,11 +684,15 @@ def download_zip():
     tmpdir = tempfile.mkdtemp(prefix="photowall_zip_", dir=str(BASE))
     zpath = Path(tmpdir) / f"photowall-{ts_str}.zip"
     # Build zip
+    photos = []
     with zipfile.ZipFile(zpath, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for p in sorted(UPLOAD_DIR.iterdir()):
             if p.is_file() and p.suffix.lower() in ALLOWED:
                 # Keep original filename inside the zip
                 zf.write(p, arcname=p.name)
+                caption = (p.stem.split("__", 1)[1].replace("_", " ").strip() if "__" in p.stem else "")[:80]
+                photos.append({"name": p.name, "url": "./" + quote(p.name, safe=""), "caption": caption})
+        zf.writestr("index.html", render_template_string(OFFLINE_GALLERY_HTML, photos=photos))
     # Cleanup after send
     @after_this_request
     def _cleanup(response):

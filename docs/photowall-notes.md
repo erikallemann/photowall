@@ -65,7 +65,7 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
   * When enabled: requires header `X-Upload-Pin` if `UPLOAD_PIN` env is set. Max size 10 MB. Types: JPG/PNG/GIF/WebP.
 * `POST /delete` — Delete one file. Header `X-Admin-Pin: <pin>` must match `ADMIN_PIN`. Returns `204` on success.
 * `POST /rescan` — Re-parse EXIF for all images. Header `X-Admin-Pin` required.
-* `GET /download` — Creates a ZIP of `uploads/` on demand and streams it (temp file cleaned up after send). Disabled when browsing an external `PHOTO_ROOT`.
+* `GET /download` — Creates a ZIP of uploaded images plus a self-contained `index.html` gallery and streams it (temp file cleaned up after send). Extract the ZIP and open `index.html` locally for thumbnails, filename captions, keyboard navigation, slideshow, and full-screen viewing where supported. No network connection or server is needed. Original image bytes and filenames are preserved; no embedded metadata is written. The extracted gallery has no PIN gate. Disabled when browsing an external `PHOTO_ROOT`.
 * `GET /uploads/<filename>` — Serves original image (with long Cache-Control).
 
 ### Sorting Logic

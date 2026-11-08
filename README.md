@@ -8,7 +8,7 @@ Photowall is a lightweight Flask application for collecting photos during an eve
 - Live photo wall with masonry or grid layout, swipe / keyboard navigation, automatic refresh, and optional uniform tiles.
 - Projector-ready slideshow with shuffle, interval control, and keyboard shortcuts.
 - Admin console for moderating and deleting individual shots.
-- ZIP export of the entire `uploads/` folder on demand.
+- ZIP export of uploaded photos with an offline gallery and captions.
 
 ## Quick start (local)
 
@@ -24,6 +24,21 @@ flask run --host=0.0.0.0 --port=$PORT
 ```
 
 Uploaded files are stored under `uploads/`. The folder is ignored by git and ships empty; keep an eye on disk usage in production.
+
+## Keeping event photos
+
+Download the ZIP from `/download`, extract it, and open `index.html` in a browser.
+Keep it alongside the extracted photos. The gallery works without a server or
+internet connection and includes thumbnails, existing upload captions, a photo
+viewer, keyboard navigation, a five-second slideshow, and full-screen viewing
+where the browser supports it. Use Left/Right to browse, Space while the photo
+is focused to play/pause, and Escape to close the viewer (leave full screen first
+if necessary).
+
+Original image files and filenames are preserved. Captions still come from the
+existing filename convention; this feature does not write EXIF/IPTC/XMP metadata
+or change the upload caption's 40-character limit. The exported gallery needs no
+PIN to open, so share the ZIP only with its intended recipients.
 
 ## Configuration
 
