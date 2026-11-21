@@ -34,7 +34,7 @@ form.addEventListener('submit', async (ev)=>{
     } else if(res.status === 403){
       setStatus('Incorrect PIN or uploads disabled.', 'error');
     } else if(res.status === 413){
-      setStatus('File is too large (max 10 MB).', 'error');
+      setStatus('Photo exceeds the upload size, pixel, or frame limit.', 'error');
     } else {
       setStatus('Upload failed ('+res.status+').', 'error');
     }

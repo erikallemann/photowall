@@ -8,23 +8,18 @@ Both local layouts handled 250 acknowledged uploads per event with 25 concurrent
 
 The staging image runs one Gunicorn worker per event as UID and GID `10001`. Mount writable event storage at `/data` or set `PHOTOWALL_DATA_DIR`. The directory holds `uploads/`, `metadata_index.json` and temporary ZIPs. `GET /readyz` returns HTTP 204 once the worker can write to the runtime directories and scan the configured photo directory. It returns HTTP 503 if an established worker loses access to those paths. An unusable data directory can also prevent startup.
 
-Use the MVP-02 upload validation code for the load run. The following combines the exact draft reviewed with the staging package in a temporary checkout. The test harness runs from the MVP-03 branch. It uses Docker, cgroup v2 and the project's virtualenv.
+Build from the MVP-03 branch, which includes the merged upload validation and inclusive multipart body limit from PR #3. Use Docker, cgroup v2 and the project's virtualenv. Allow disk space for both 2 GiB galleries and temporary ZIP copies on the host and in event storage.
 
 ```bash
-stage_dir=$(mktemp -d)
-git worktree add --detach "$stage_dir/source" 532d312bd0f1eeda1793fd7f1797b75d14cec050
-git -C "$stage_dir/source" cherry-pick 0a5a5b0
-docker build --platform linux/amd64 -t photowall:mvp03-combined "$stage_dir/source"
-.venv/bin/python deploy/staging_compare.py photowall:mvp03-combined
-git worktree remove "$stage_dir/source"
-rmdir "$stage_dir"
+docker build --platform linux/amd64 -t photowall:mvp03-merged .
+.venv/bin/python deploy/staging_compare.py photowall:mvp03-merged --quota --cycles 1
 ```
 
-The harness starts a loopback Caddy gateway and brings up each layout ten times with warm local images. Each event gets distinct view, upload and admin PINs plus a separate event directory. The separate containers each have one CPU and 512 MiB of memory. The shared container has two CPUs and 1 GiB and runs both event processes as the same UID. Only the gateway publishes a host port. The harness tags containers, event volumes and the network with the run ID and checks their inventory before creation and after teardown.
+The harness starts a loopback Caddy gateway and brings up each layout once for the quota rehearsal. For the smaller baseline and ten warm readiness samples per layout, omit `--quota --cycles 1`. Each event gets distinct view, upload and admin PINs plus a separate event directory. The separate containers each have one CPU and 512 MiB of memory. The shared container has two CPUs and 1 GiB and runs both event processes as the same UID. Only the gateway publishes a host port. The harness checks for leftover upload staging files and ZIP directories before teardown and checks the run's container, volume and network inventory before creation and after teardown.
 
-The workload posts 250 PNGs per event, including one near 10 MiB, while wall and slideshow list requests run every 0.5 seconds. Each gallery holds 68.2 MiB of originals and gets a ZIP export through the proxy. The first attempt with the default 30-second scan TTL saw stale lists after uploads. The measured runs use `PHOTO_SCAN_TTL=0` for both layouts.
+Both workloads post 250 PNGs per event while wall and slideshow list requests run every 0.5 seconds. The quota workload uploads exactly 2 GiB per event, including one 10 MiB photo. The smaller baseline uploads 68.2 MiB per event, including one photo near 10 MiB. Both download each event's ZIP through the proxy. The first attempt with the default 30-second scan TTL saw stale lists after uploads. The measured runs use `PHOTO_SCAN_TTL=0` for both layouts.
 
-## Measurements
+## Earlier baseline measurements
 
 Local run on 2026-11-21. Photowall image index `sha256:17fc098edb7b4a010e755102eb82914aee910e919b1ff0e98d568ec9dd662e02`. The base image, Python runtime package versions and Caddy image digest are pinned in the repository. Time measurements include the loopback gateway. Each p95 readiness measurement is the slowest of ten samples.
 

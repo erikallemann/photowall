@@ -44,9 +44,9 @@ Use approved staging credentials and a recorded spending ceiling for live provis
 ## First three implementation PRs
 
 1. **Enforce view access for photo assets and PIN redirects** (`codex/protect-photo-access`, MVP-01). The app-side work merged in [PR #2](https://github.com/erikallemann/photowall/pull/2). The production CDN check remains pending. Follow the [private media and expiry verification steps](photowall-notes.md#private-media-and-expiry) before the first protected event.
-2. **Validate and bound photo uploads** (`codex/bound-photo-uploads`, MVP-02). The draft passed 82 tests. Gunicorn accepted valid 10 MiB photos and multipart bodies at the inclusive 10 MiB + 64 KiB cap, and returned 413 one byte above either limit. [Draft PR #3](https://github.com/erikallemann/photowall/pull/3).
+2. **Validate and bound photo uploads** (`codex/bound-photo-uploads`, MVP-02). The 82-test suite passed before the work merged in PR #3. Gunicorn accepted valid 10 MiB photos and multipart bodies at the inclusive 10 MiB + 64 KiB cap, and returned 413 one byte above either limit. [PR #3](https://github.com/erikallemann/photowall/pull/3).
 3. **Package Photowall and compare event hosting in staging** (`codex/event-hosting-spike`, MVP-03). The pinned Gunicorn image, readiness check and two-event local comparison are ready. Live provider evidence and the paid topology decision are pending. [Local staging results](mvp03-staging.md).
 
 ## Exact next Codex task
 
-> Complete the draft upload PR review and merge before public staging. Once staging access and spend are approved, run the same two-event synthetic workload on temporary Fly Machines and shared hosting. Record measured readiness, recovery, costs and cleanup, then decide the paid topology from those results.
+> Once staging access and spend are approved, run the same two-event synthetic workload on temporary Fly Machines and shared hosting. Record measured readiness, recovery, costs and cleanup, then decide the paid topology from those results.

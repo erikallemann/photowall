@@ -326,6 +326,13 @@ def compare(image, count, cycles, shared, quota):
             expect(404, Endpoint(loopback, {}, "unknown.wall.test").request("GET", "/list"))
             assert all(docker("port", name) == "" for name in containers)
             metrics = run_workload(endpoints, count, quota)
+            for name in containers:
+                leftovers = docker(
+                    "exec", name, "find", "/data", "(", "-name", "photowall_zip_*", "-o",
+                    "-name", ".photowall-upload-*.tmp", ")", "-print",
+                )
+                assert not leftovers, (name, leftovers)
+            metrics["temporary_artifacts_after_workload"] = 0
             metrics["ready_seconds"] = p50_p95(ready)
             metrics["ready_samples"] = [round(t, 3) for t in ready]
             metrics["storage_bytes"] = [int(docker("exec", name, "du", "-sb", "/data").split()[0])
