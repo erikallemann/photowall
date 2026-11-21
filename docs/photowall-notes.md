@@ -2,6 +2,8 @@
 
 This document summarizes the **Photowall** photo wall built with Flask, Gunicorn, and Caddy on Ubuntu (user-level systemd). It captures architecture, behavior, endpoints, deploy, operations, and constraints so another agent can assist without reading the full chat history.
 
+For commercial hosting, see the [MVP assessment](mvp-assessment.md) and [implementation plan](mvp-implementation-plan.md). This document describes the current standalone service and its operational behavior.
+
 ---
 
 ## 1) Purpose & Scope
@@ -160,38 +162,13 @@ ALLOW_UPLOAD=0
 
 ## 7) Caddy Reverse Proxy (TLS + static `/uploads`)
 
-Site block for `example.com` (key bits):
+Use the checked-in [Caddy example](../deploy/caddy/Caddyfile.example) as a reference for standalone deployments. It routes `/uploads/*` through Flask. Keep asset requests behind the same proxy as the rest of the app when preparing a protected event. Any legacy direct file-server rule for that path bypasses application checks.
 
-```caddy
-example.com {
-    encode zstd gzip
+### Current PIN and cache behavior
 
-    # Serve uploaded files directly (faster than proxying to Flask)
-    handle_path /uploads/* {
-        # If using PHOTO_ROOT, set this to that folder instead of uploads/
-        root * ~/photowall/uploads
-        file_server
-        header Cache-Control "public, max-age=604800, immutable"
-    }
+`VIEW_PIN` gates the UI and JSON routes, including `/dirs`, plus the ZIP. The current Flask asset route still serves original images at direct URLs with public, week-long cache headers. Protected event hosting requires [MVP-01](mvp-implementation-plan.md#backlog), cache bypass and a purge of any prior edge-cached photos when locking down a site. Copies already held by browsers or downloaded by guests can remain outside the service.
 
-    # App routes
-    reverse_proxy 127.0.0.1:8081
-
-    # Optional access log
-    log {
-        format console
-        output file /var/log/caddy/photowall_access.log {
-            roll_size 10MiB
-            roll_keep 7
-            roll_keep_for 168h
-        }
-    }
-}
-```
-
-### Optional: Lock down static assets too
-
-The app-level `VIEW_PIN` prevents discovery of content via UI and JSON (`/`, `/wall`, `/slideshow`, `/list`, `/download`). Direct image URLs under `/uploads/` remain public for performance and long-lived caching. If you want full lockdown, enforce auth at the reverse proxy for those paths as well (e.g., Caddy `basicauth` or a simple PIN form).
+The checked-in Caddy example also shows an upstream `X-Upload-Pin` header override. A commercial proxy must pass and enforce the guest's own credential, so treat the example override as standalone-specific.
 
 Reload:
 
@@ -236,7 +213,7 @@ sudo systemctl reload caddy
 ## 10) Performance Tips
 
 * Gunicorn: `-w 4 --threads 2` on a 1–2 vCPU VM is fine for 10–20 concurrent users.
-* Let **Caddy** serve `/uploads` directly to offload Python.
+* On public standalone walls, Caddy can offload static photo serving. Proxy all commercial event media through the application access checks.
 * Optional downscale on upload to 2560px long edge and re-encode JPEG quality \~85 to reduce bandwidth.
 * Client uses `loading="lazy"` and periodic JSON fetches (`no-store`) to minimize bytes.
 

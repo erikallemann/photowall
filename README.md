@@ -106,10 +106,11 @@ journalctl --user -u photowall -f
 | `/download` | GET | Streams a ZIP archive of `uploads/` (disabled when browsing an external `PHOTO_ROOT`). |
 | `/uploads/<filename>` | GET | Serves stored assets with aggressive caching. |
 
-## Next steps
+## Commercial MVP
 
-- Add CI (lint/test) if you expect contributions.
-- Configure Dependabot or Renovate to track dependency updates once the repo is on GitHub.
+The [MVP assessment](docs/mvp-assessment.md) covers launch blockers, Fly.io feasibility and the shared hosting comparison. The [implementation plan](docs/mvp-implementation-plan.md) lists the dependencies, acceptance criteria, first three implementation PRs and the exact next Codex task.
+
+The deployment instructions above describe the standalone app. A VIEW_PIN on the current app leaves direct photo URLs accessible and publicly cacheable. See the [deployment notes](docs/photowall-notes.md#7-caddy-reverse-proxy-tls--static-uploads) for the current proxy behavior.
 
 ## License
 
