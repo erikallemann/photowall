@@ -46,7 +46,15 @@ Local run on 2026-11-21. Photowall image index `sha256:17fc098edb7b4a010e755102e
 - Two gateway reloads kept expired alpha routes at HTTP 410 for lists, direct photos, uploads, deletes and ZIPs while beta polls continued. The alpha backend and volume were still present during this check, modeling expiry before cleanup. This exercised gateway routing with an operator-triggered expiry.
 - The branch passed 53 tests with `.venv/bin/python -m pytest`. The combined checkout passed 82 with the same project virtualenv. The local harness finished both run IDs, `pw-mvp03-b841bf90` and `pw-mvp03-49e21972`, with empty inventories.
 
+## Quota rehearsal for the live runbook
+
+The fixed upload PR and staging package passed the full local quota command `.venv/bin/python deploy/staging_compare.py photowall:mvp03-boundary-fixed --quota --cycles 1`. Both layouts uploaded 250 photos totaling 2 GiB per event and verified every original in the downloaded ZIPs. Separate-container ZIPs took 74.5 and 78.3 seconds. Shared-container ZIPs took 52.4 and 54.6 seconds. These are full response times from one run per layout. The Gunicorn worker timeout and gateway response-header timeout were both 180 seconds. The first attempt with the default worker timeout returned HTTP 500 during export.
+
+The separate-container run `pw-mvp03-2d532feb` and shared run `pw-mvp03-4f916f03` finished with empty staging inventories. Both reached their cgroup memory allocation including page cache. Measure peak RSS, disk headroom and the browser delay during an export on the live layouts.
+
 ## What remains for live staging
+
+The [live staging runbook](mvp03-live-runbook.md) records the scope and procedures for the next comparison.
 
 - Use the same fixture on two private Fly Machines with encrypted volumes and automatic snapshots disabled, and on an approved shared host or the Fly shared baseline. Measure end-to-end wall update timing with real polling, edge and origin TLS, private origin reachability and multipart limits through the live gateway. The local benchmark used 68.2 MiB per event and sampled cgroup memory and steady storage. At the byte quota, measure peak RSS and disk use during uploads and exports, ZIP timeouts and egress.
 - Exercise lost create responses, provider outage during cleanup, repeated scoped deletion, and host or disk loss. Verify resource IDs, machine and volume removal, snapshot inventory and recovery against the retention targets. Fly bills for detached volumes and for stopped Machine root filesystems. Fly volumes are tied to one host, so a restart with the same volume covers a narrower failure case than host loss. [Fly pricing](https://docs.fly.io/about/pricing), [Fly volume behavior](https://docs.fly.io/volumes/overview), [Machines API](https://docs.fly.io/machines/api/machines-resource), [Volumes API](https://docs.fly.io/machines/api/volumes-resource).

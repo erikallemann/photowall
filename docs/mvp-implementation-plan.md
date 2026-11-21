@@ -30,7 +30,7 @@ These staging defaults are planning assumptions. Confirm the domain, availabilit
 
 ## Staging comparison for MVP-03
 
-The [local staging results](mvp03-staging.md) include the reproducible comparison and the outstanding live checks.
+The [local staging results](mvp03-staging.md) include the reproducible comparison. The [live staging runbook](mvp03-live-runbook.md) covers approved access, quota-size ZIPs, recovery, expiry cleanup and cost reconciliation. Provisioning and the loss drill are paused pending the approved scope.
 
 1. Build a reproducible pinned image. Use separately configured event data paths, a test-only gateway and one approved EU region. Record image digest, region, token scope, limits, boot and readiness times, and provider resource IDs in redacted logs.
 2. Start two temporary Machines with encrypted volumes with automatic snapshots off. Route two test hostnames through one wildcard and gateway. Check edge/origin TLS, allowed Host handling, public-origin rejection and per-Machine routing for image requests, full multipart POSTs and ZIP downloads. Restart one Machine, then verify its photos remain available. Check repeat creation, interrupted provisioning, concurrent events and recovery after a lost create response using synthetic data.
@@ -44,7 +44,7 @@ Use approved staging credentials and a recorded spending ceiling for live provis
 ## First three implementation PRs
 
 1. **Enforce view access for photo assets and PIN redirects** (`codex/protect-photo-access`, MVP-01). The app-side work merged in [PR #2](https://github.com/erikallemann/photowall/pull/2). The production CDN check remains pending. Follow the [private media and expiry verification steps](photowall-notes.md#private-media-and-expiry) before the first protected event.
-2. **Validate and bound photo uploads** (`codex/bound-photo-uploads`, MVP-02). The draft passed 81 tests. Gunicorn accepted a valid 10 MiB file and rejected larger files and requests above the body cap. A fixed-length request exactly at the 10 MiB + 64 KiB body cap also returns 413 under Gunicorn 26.0.0. [Draft PR #3](https://github.com/erikallemann/photowall/pull/3).
+2. **Validate and bound photo uploads** (`codex/bound-photo-uploads`, MVP-02). The draft passed 82 tests. Gunicorn accepted valid 10 MiB photos and multipart bodies at the inclusive 10 MiB + 64 KiB cap, and returned 413 one byte above either limit. [Draft PR #3](https://github.com/erikallemann/photowall/pull/3).
 3. **Package Photowall and compare event hosting in staging** (`codex/event-hosting-spike`, MVP-03). The pinned Gunicorn image, readiness check and two-event local comparison are ready. Live provider evidence and the paid topology decision are pending. [Local staging results](mvp03-staging.md).
 
 ## Exact next Codex task
