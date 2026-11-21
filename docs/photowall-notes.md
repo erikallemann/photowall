@@ -2,6 +2,8 @@
 
 This document summarizes the **Photowall** photo wall built with Flask, Gunicorn, and Caddy on Ubuntu (user-level systemd). It captures architecture, behavior, endpoints, deploy, operations, and constraints so another agent can assist without reading the full chat history.
 
+For commercial hosting, see the [MVP assessment](mvp-assessment.md) and [implementation plan](mvp-implementation-plan.md). This document describes the current standalone service and its operational behavior.
+
 ---
 
 ## 1) Purpose & Scope
@@ -162,6 +164,8 @@ ALLOW_UPLOAD=0
 ## 7) Caddy Reverse Proxy
 
 Use the [checked-in Caddy example](../deploy/caddy/Caddyfile.example). It sends media requests to Flask.
+
+The example overrides the upstream `X-Upload-Pin` header for standalone deployments. A commercial proxy must forward the guest's own credential for Flask to validate.
 
 ### Private media and expiry
 

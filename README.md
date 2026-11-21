@@ -107,10 +107,9 @@ journalctl --user -u photowall -f
 | `/download` | GET | Streams a ZIP archive of `uploads/` (disabled when browsing an external `PHOTO_ROOT`). |
 | `/uploads/<filename>` | GET | Serves stored assets. PIN-protected responses use `private, no-store`. Public assets remain cacheable. |
 
-## Next steps
+## Commercial MVP
 
-- Add CI (lint/test) if you expect contributions.
-- Configure Dependabot or Renovate to track dependency updates once the repo is on GitHub.
+The [MVP assessment](docs/mvp-assessment.md) covers launch blockers, Fly.io feasibility and the shared hosting comparison. The [implementation plan](docs/mvp-implementation-plan.md) lists the dependencies, acceptance criteria, first three implementation PRs and the exact next Codex task.
 
 ## License
 
