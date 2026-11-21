@@ -64,7 +64,10 @@ For commercial hosting, see the [MVP assessment](mvp-assessment.md) and [impleme
   * `ts` = upload timestamp (ms) when filenames follow the upload convention; otherwise falls back to file mtime. `tk` = taken timestamp (ms, may be null). `cap` = caption from filename if present.
 * `POST /upload` — **Disabled by default**; returns `403` unless `ALLOW_UPLOAD=1` set.
 
-  * When enabled: requires header `X-Upload-Pin` if `UPLOAD_PIN` env is set. Max size 10 MB. Types: JPG/PNG/GIF/WebP.
+  * When enabled, send one `file` and an optional `caption` as multipart form data. Include `X-Upload-Pin` if `UPLOAD_PIN` is configured. Uploads require a writable local `uploads/` library.
+  * The file limit is 10 MiB (10,485,760 bytes). The inclusive request body limit is 10 MiB plus 64 KiB (10,551,296 bytes), including multipart headers, boundaries and fields. This applies to both fixed-length and chunked uploads. A reverse proxy with its own body cap needs to allow the multipart overhead too.
+  * Pillow verifies and fully decodes JPEG (`.jpg` or `.jpeg`), PNG, GIF and WebP. The filename extension must match the decoded format. A supplied part media type must also match, with `application/octet-stream` accepted as a generic label. The limits are 25 million canvas pixels per frame, 100 frames and 60 million canvas pixels summed across frames.
+  * Invalid images return `400` and exceeded limits return `413`. Validated originals are published atomically in `uploads/` and return `201 OK`. The app removes staging files when a request fails.
 * `POST /delete` — Delete one file. Header `X-Admin-Pin: <pin>` must match `ADMIN_PIN`. Returns `204` on success.
 * `POST /rescan` — Re-parse EXIF for all images. Header `X-Admin-Pin` required.
 * `GET /download` — Creates a ZIP of uploaded images plus a self-contained `index.html` gallery and streams it (temp file cleaned up after send). Extract the ZIP and open `index.html` locally for thumbnails, filename captions, keyboard navigation, slideshow, and full-screen viewing where supported. No network connection or server is needed. Original image bytes and filenames are preserved; no embedded metadata is written. The extracted gallery has no PIN gate. Disabled when browsing an external `PHOTO_ROOT`.

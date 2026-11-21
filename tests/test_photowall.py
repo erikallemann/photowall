@@ -1,12 +1,23 @@
+import errno
 import io
+import os
+import shutil
+import socket
+import struct
+import subprocess
+import sys
 import time
+import zlib
 from html.parser import HTMLParser
+from http.client import HTTPConnection
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import unquote
 import zipfile
 
 import pytest
 from PIL import Image
+from werkzeug.datastructures import FileStorage
 
 import photowall
 
@@ -23,7 +34,6 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(photowall, "PHOTO_RECURSIVE", False)
     monkeypatch.setattr(photowall, "PHOTO_SCAN_TTL", 0)
     monkeypatch.setattr(photowall, "ALLOW_UPLOAD", False)
-    monkeypatch.setattr(photowall, "ALLOW_UPLOAD_EFFECTIVE", False)
     monkeypatch.setattr(photowall, "UPLOAD_PIN", "")
     monkeypatch.setattr(photowall, "VIEW_PIN", "")
     monkeypatch.setattr(photowall, "EVENT_EXPIRES_AT", None)
@@ -184,7 +194,6 @@ def test_extracted_css_files_are_served(client, css_path):
 
 def test_upload_enabled_home_page_links_upload_form_css(client, monkeypatch):
     monkeypatch.setattr(photowall, "ALLOW_UPLOAD", True)
-    monkeypatch.setattr(photowall, "ALLOW_UPLOAD_EFFECTIVE", True)
 
     response = client.get("/")
 
@@ -342,49 +351,332 @@ def test_list_returns_json_items(client):
     ]
 
 
-def test_uploads_are_disabled_by_default(client):
-    response = client.post(
-        "/upload",
-        data={"file": (io.BytesIO(_small_jpeg_bytes()), "party.jpg")},
-        content_type="multipart/form-data",
-    )
-
-    assert response.status_code == 403
-    assert list(photowall.UPLOAD_DIR.iterdir()) == []
-
-
-def test_upload_can_be_enabled_and_accepts_small_valid_image(client, monkeypatch):
+@pytest.fixture()
+def upload_client(client, monkeypatch):
     monkeypatch.setattr(photowall, "ALLOW_UPLOAD", True)
-    monkeypatch.setattr(photowall, "ALLOW_UPLOAD_EFFECTIVE", True)
+    return client
 
-    response = client.post(
-        "/upload",
-        data={
-            "caption": "hello there",
-            "file": (io.BytesIO(_small_jpeg_bytes()), "party.jpg"),
-        },
-        content_type="multipart/form-data",
-    )
+
+def _upload_photo(client, data, name="party.jpg", *, content_type=None, headers=None, caption="hello there"):
+    file = (io.BytesIO(data), name)
+    if content_type is not None:
+        file += (content_type,)
+    return client.post("/upload", data={"file": file, "caption": caption}, headers=headers)
+
+
+def _image_bytes(image_format, size=(2, 2), frame_count=1):
+    buf = io.BytesIO()
+    first = Image.new("RGB", size, color="red")
+    options = {}
+    if frame_count > 1:
+        colors = ("red", "blue", "green")
+        frames = [Image.new("RGB", size, color=colors[frame % len(colors)]) for frame in range(1, frame_count)]
+        options = {
+            "save_all": True,
+            "append_images": frames,
+            "duration": 100,
+        }
+    first.save(buf, format=image_format, **options)
+    return buf.getvalue()
+
+
+def _assert_no_upload(client):
+    assert list(photowall.UPLOAD_DIR.iterdir()) == []
+    assert client.get("/list").get_json()["items"] == []
+    assert not photowall.METADB_PATH.exists()
+
+
+def test_uploads_are_disabled_by_default(client):
+    assert _upload_photo(client, _small_jpeg_bytes()).status_code == 403
+    _assert_no_upload(client)
+
+
+@pytest.mark.parametrize("external_library", [False, True])
+def test_uploads_require_a_writable_local_library(upload_client, monkeypatch, tmp_path, external_library):
+    if external_library:
+        library_dir = tmp_path / "library"
+        library_dir.mkdir()
+        monkeypatch.setattr(photowall, "PHOTO_DIR", library_dir)
+    else:
+        monkeypatch.setattr(photowall, "PHOTO_READONLY", True)
+
+    assert _upload_photo(upload_client, _small_jpeg_bytes()).status_code == 403
+    _assert_no_upload(upload_client)
+    assert list(photowall.PHOTO_DIR.iterdir()) == []
+
+
+def test_upload_pin_is_required_only_when_configured(upload_client, monkeypatch):
+    monkeypatch.setattr(photowall, "UPLOAD_PIN", "uploader")
+    photo = _small_jpeg_bytes()
+
+    assert _upload_photo(upload_client, photo).status_code == 403
+    assert _upload_photo(upload_client, photo, headers={"X-Upload-Pin": "wrong"}).status_code == 403
+    _assert_no_upload(upload_client)
+    assert _upload_photo(upload_client, photo, headers={"X-Upload-Pin": "uploader"}).status_code == 201
+
+
+@pytest.mark.parametrize(
+    ("image_format", "ext"),
+    [("JPEG", ".jpg"), ("JPEG", ".jpeg"), ("PNG", ".png"), ("GIF", ".gif"), ("WEBP", ".webp")],
+)
+def test_upload_accepts_supported_formats(upload_client, image_format, ext):
+    photo = _image_bytes(image_format)
+    response = _upload_photo(upload_client, photo, "party" + ext)
 
     assert response.status_code == 201
-    saved = list(photowall.UPLOAD_DIR.iterdir())
-    assert len(saved) == 1
-    assert saved[0].suffix == ".jpg"
-    assert "__hello_there" in saved[0].stem
+    assert response.data == b"OK"
+    saved, = photowall.UPLOAD_DIR.iterdir()
+    assert saved.suffix == ext
+    assert saved.stem.endswith("party__hello_there")
+    assert saved.read_bytes() == photo
+    assert upload_client.get(f"/uploads/{saved.name}").data == photo
 
 
-def test_oversized_upload_is_rejected(client, monkeypatch):
-    monkeypatch.setattr(photowall, "ALLOW_UPLOAD", True)
-    monkeypatch.setattr(photowall, "ALLOW_UPLOAD_EFFECTIVE", True)
+def _png_with_size(size):
+    png = _image_bytes("PNG")
+    # Add a private ancillary chunk with a valid CRC before IEND.
+    data = b"paDd" + bytes(size - len(png) - 12)
+    chunk = struct.pack(">I", len(data) - 4) + data + struct.pack(">I", zlib.crc32(data))
+    return png[:-12] + chunk + png[-12:]
 
-    response = client.post(
+
+@pytest.mark.parametrize(("extra_bytes", "status"), [(0, 201), (1, 413)])
+def test_upload_file_size_boundary(upload_client, extra_bytes, status):
+    photo = _png_with_size(10 * 1024 * 1024 + extra_bytes)
+    response = _upload_photo(upload_client, photo, "party.png", caption="x" * 40)
+
+    assert response.status_code == status
+    if status == 201:
+        saved, = photowall.UPLOAD_DIR.iterdir()
+        assert saved.read_bytes() == photo
+    else:
+        _assert_no_upload(upload_client)
+
+
+def test_gunicorn_upload_request_size_boundary(tmp_path):
+    shutil.copy2(photowall.__file__, tmp_path)
+    try:
+        listener = socket.socket()
+        with listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            fd = listener.fileno()
+            server = subprocess.Popen(
+                [sys.executable, "-m", "gunicorn", "--bind", f"fd://{fd}", "photowall:app"],
+                cwd=tmp_path, pass_fds=(fd,),
+                env={"PATH": os.defpath, "ALLOW_UPLOAD": "1", "XDG_RUNTIME_DIR": str(tmp_path)},
+            )
+    except OSError as exc:
+        if exc.errno in (errno.EACCES, errno.EPERM):
+            pytest.skip(f"Gunicorn HTTP test requires a loopback listener: {exc}")
+        raise
+
+    boundary = "gunicorn-smoke"
+    file_header = (
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="party.png"\r\n'
+        "Content-Type: image/png\r\n\r\n"
+    ).encode()
+    caption_header = f'\r\n--{boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n'.encode()
+    closing = f"\r\n--{boundary}--\r\n".encode()
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    try:
+        photo = _png_with_size(10 * 1024 * 1024)
+        cap = 10_551_296
+        padding = b"x" * (cap - len(file_header + photo + caption_header + closing))
+        body = file_header + photo + caption_header + padding + closing
+        assert len(body) == cap
+        for chunked in (False, True):
+            for extra in (b"", b"x"):
+                expected = 413 if extra else 201
+                payload = body[:-len(closing)] + extra + closing if extra else body
+                connection = HTTPConnection("127.0.0.1", port, timeout=15)
+                try:
+                    if chunked:
+                        chunks = (payload[i:i + 65536] for i in range(0, len(payload), 65536))
+                        try:
+                            connection.request("POST", "/upload", chunks, headers, encode_chunked=True)
+                        except (BrokenPipeError, ConnectionResetError):
+                            # Gunicorn can send 413 before the final chunk terminator.
+                            if not extra:
+                                raise
+                    elif extra:
+                        # A declared oversized body must be rejected before reading any data.
+                        connection.request("POST", "/upload", headers={**headers, "Content-Length": str(len(payload))})
+                    else:
+                        connection.request("POST", "/upload", body, headers)
+                    response = connection.getresponse()
+                    assert response.status == expected, f"chunked={chunked}, body size={len(payload)}"
+                    response.read()
+                finally:
+                    connection.close()
+
+        saved = list((tmp_path / "uploads").iterdir())
+        assert len(saved) == 2
+        assert all(path.read_bytes() == photo for path in saved)
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait()
+
+
+def test_oversized_request_is_rejected_before_multipart_is_read(upload_client):
+    class UnreadableBody(io.BytesIO):
+        def read(self, size=-1):
+            pytest.fail("Oversized request body was read")
+
+        def readinto(self, buffer):
+            pytest.fail("Oversized request body was read")
+
+    response = upload_client.post(
         "/upload",
-        data={"file": (io.BytesIO(b"x" * (photowall.MAX_BYTES + 1)), "too-big.jpg")},
-        content_type="multipart/form-data",
+        environ_overrides={
+            "CONTENT_LENGTH": str(photowall.MAX_UPLOAD_REQUEST_BYTES + 1),
+            "CONTENT_TYPE": "multipart/form-data; boundary=example",
+            "wsgi.input": UnreadableBody(),
+        },
     )
 
     assert response.status_code == 413
-    assert list(photowall.UPLOAD_DIR.iterdir()) == []
+    _assert_no_upload(upload_client)
+
+
+def test_streamed_request_is_bounded_without_content_length(upload_client):
+    boundary = "example"
+    body = (
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="party.jpg"\r\n'
+        "Content-Type: image/jpeg\r\n\r\n"
+    ).encode() + bytes(photowall.MAX_UPLOAD_REQUEST_BYTES) + f"\r\n--{boundary}--\r\n".encode()
+    stream = io.BytesIO(body)
+    response = upload_client.post(
+        "/upload",
+        environ_overrides={
+            "CONTENT_LENGTH": None,
+            "CONTENT_TYPE": f"multipart/form-data; boundary={boundary}",
+            "HTTP_TRANSFER_ENCODING": "chunked",
+            "wsgi.input": stream,
+            "wsgi.input_terminated": True,
+        },
+    )
+
+    assert response.status_code == 413
+    assert stream.tell() == photowall.MAX_UPLOAD_REQUEST_BYTES + 1
+    _assert_no_upload(upload_client)
+
+
+@pytest.mark.parametrize(
+    ("image_format", "ext", "trim"),
+    [("JPEG", ".jpg", 10), ("PNG", ".png", 4), ("GIF", ".gif", 1), ("WEBP", ".webp", 4)],
+)
+def test_upload_rejects_truncated_supported_images(upload_client, image_format, ext, trim):
+    photo = _image_bytes(image_format)[:-trim]
+    assert _upload_photo(upload_client, photo, "party" + ext).status_code == 400
+    _assert_no_upload(upload_client)
+
+
+@pytest.mark.parametrize(
+    ("image_format", "filename", "content_type"),
+    [
+        ("PNG", "party.jpg", None),
+        ("JPEG", "party.jpg", "image/png"),
+        ("JPEG", "party.txt", None),
+        ("BMP", "party.jpg", None),
+        (None, "party.png", None),
+    ],
+)
+def test_upload_rejects_mislabeled_or_unsupported_images(upload_client, image_format, filename, content_type):
+    photo = _image_bytes(image_format) if image_format else b"broken image"
+    assert _upload_photo(upload_client, photo, filename, content_type=content_type).status_code == 400
+    _assert_no_upload(upload_client)
+
+
+def test_upload_allows_generic_content_type(upload_client):
+    response = _upload_photo(upload_client, _small_jpeg_bytes(), content_type="application/octet-stream")
+    assert response.status_code == 201
+
+
+def test_upload_rejects_excess_pixels_in_one_frame(upload_client):
+    photo = _image_bytes("PNG", size=(5001, 5000))
+    assert _upload_photo(upload_client, photo, "party.png").status_code == 413
+    _assert_no_upload(upload_client)
+
+
+@pytest.mark.parametrize(("image_format", "ext"), [("GIF", ".gif"), ("PNG", ".png"), ("WEBP", ".webp")])
+def test_animated_upload_frame_limit(upload_client, image_format, ext):
+    over_limit = _image_bytes(image_format, frame_count=photowall.MAX_FRAMES + 1)
+    assert _upload_photo(upload_client, over_limit, "party" + ext).status_code == 413
+    _assert_no_upload(upload_client)
+
+    at_limit = _image_bytes(image_format, frame_count=photowall.MAX_FRAMES)
+    assert _upload_photo(upload_client, at_limit, "party" + ext).status_code == 201
+    saved, = photowall.UPLOAD_DIR.iterdir()
+    assert saved.read_bytes() == at_limit
+
+
+def test_upload_rejects_excess_pixels_across_frames(upload_client, monkeypatch):
+    monkeypatch.setattr(photowall, "MAX_TOTAL_PIXELS", 7)
+    photo = _image_bytes("GIF", frame_count=2)
+    assert _upload_photo(upload_client, photo, "party.gif").status_code == 413
+    _assert_no_upload(upload_client)
+
+
+def test_upload_rejects_apng_with_undeclared_frames(upload_client):
+    photo = bytearray(_image_bytes("PNG", frame_count=2))
+    control = photo.index(b"acTL")
+    struct.pack_into(">I", photo, control + 4, 1)
+    struct.pack_into(">I", photo, control + 12, zlib.crc32(photo[control:control + 12]))
+
+    assert _upload_photo(upload_client, photo, "party.png").status_code == 400
+    _assert_no_upload(upload_client)
+
+
+def test_upload_rejects_gif_frames_outside_the_canvas(upload_client):
+    photo = bytearray(_image_bytes("GIF", frame_count=2))
+    descriptor = photo.rindex(b"\x21\xf9\x04") + 8
+    assert photo[descriptor] == ord(",")
+    struct.pack_into("<H", photo, descriptor + 5, 3)  # widen the second frame beyond the canvas
+
+    assert _upload_photo(upload_client, photo, "party.gif").status_code == 400
+    _assert_no_upload(upload_client)
+
+
+def test_upload_disconnect_during_multipart(upload_client):
+    body = (
+        b'--example\r\nContent-Disposition: form-data; name="file"; filename="party.jpg"\r\n'
+        b"Content-Type: image/jpeg\r\n\r\n" + _small_jpeg_bytes()
+    )
+    response = upload_client.post(
+        "/upload",
+        environ_overrides={
+            "CONTENT_LENGTH": str(len(body) + 20),
+            "CONTENT_TYPE": "multipart/form-data; boundary=example",
+            "wsgi.input": io.BytesIO(body),
+        },
+    )
+
+    assert response.status_code == 400
+    _assert_no_upload(upload_client)
+
+
+def test_upload_cleans_up_after_interrupted_staging(upload_client, monkeypatch):
+    def interrupted_save(self, destination):
+        destination.write(b"partial image")
+        destination.flush()
+        stage = Path(destination.name)
+        assert stage.parent == photowall.UPLOAD_DIR
+        assert stage.exists()
+        reader = photowall.app.test_client()
+        assert reader.get("/list").get_json()["items"] == []
+        assert reader.get(f"/uploads/{stage.name}").status_code == 404
+        raise OSError("staging interrupted")
+
+    monkeypatch.setattr(FileStorage, "save", interrupted_save)
+    with pytest.raises(OSError, match="staging interrupted"):
+        _upload_photo(upload_client, _small_jpeg_bytes())
+    _assert_no_upload(upload_client)
 
 
 def test_download_returns_zip_for_default_uploads_folder(client):

@@ -13,12 +13,14 @@ Env:
   ALLOW_UPLOAD=1 to re-enable uploads later if desired.
 """
 
-import os, re, json, time, secrets, mimetypes, tempfile, zipfile
+import os, re, json, time, secrets, struct, tempfile, zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, unquote
-from flask import Flask, request, send_from_directory, jsonify, Response, send_file, after_this_request, session, redirect, render_template, render_template_string
+from flask import Flask, request, send_from_directory, jsonify, Response, send_file, after_this_request, session, redirect, render_template, render_template_string, abort
+from PIL import Image
+from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
 
 # ---------- Paths & config ----------
 BASE = Path(__file__).resolve().parent
@@ -52,8 +54,15 @@ except Exception:
     PHOTO_SCAN_TTL = 30
 PHOTO_SCAN_TTL = max(0, min(PHOTO_SCAN_TTL, 3600))
 
-MAX_BYTES = 10 * 1024 * 1024  # 10 MB
-ALLOWED = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+MAX_BYTES = 10 * 1024 * 1024
+MAX_UPLOAD_REQUEST_BYTES = MAX_BYTES + 64 * 1024
+MAX_FRAME_PIXELS = 25_000_000
+MAX_FRAMES = 100
+MAX_TOTAL_PIXELS = 60_000_000
+UPLOAD_FORMATS = {".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG", ".gif": "GIF", ".webp": "WEBP"}
+ALLOWED = set(UPLOAD_FORMATS)
+UPLOAD_TEMP_PREFIX = ".photowall-upload-"
+UPLOAD_TEMP_SUFFIX = ".tmp"
 
 # Optional pins from env
 UPLOAD_PIN = os.environ.get("UPLOAD_PIN", "").strip()
@@ -75,7 +84,6 @@ if event_deadline:
         raise ValueError("EVENT_EXPIRES_AT must include a timezone")
     EVENT_EXPIRES_AT = deadline.timestamp()
 ALLOW_UPLOAD = os.environ.get("ALLOW_UPLOAD", "0").strip().lower() in {"1","true","yes","on"}
-ALLOW_UPLOAD_EFFECTIVE = ALLOW_UPLOAD and (PHOTO_DIR.resolve() == UPLOAD_DIR.resolve()) and (not PHOTO_READONLY)
 
 # Simple metadata cache so we don't parse EXIF on every request
 METADB_PATH = BASE / "metadata_index.json"
@@ -90,14 +98,100 @@ app.secret_key = (SECRET_KEY or ADMIN_PIN or UPLOAD_PIN or secrets.token_hex(16)
 # ---------- Helpers ----------
 _slug_re = re.compile(r"[^a-zA-Z0-9_.-]+")
 
-def _safe_name(original: str) -> str:
-    base, ext = os.path.splitext(original or "upload.jpg")
-    ext = ext.lower()
-    if ext not in ALLOWED:
-        guessed = mimetypes.guess_extension(mimetypes.guess_type(original or "")[0] or "") or ".jpg"
-        ext = guessed if guessed in ALLOWED else ".jpg"
-    base = _slug_re.sub("_", base)[:60] or "upload"
-    return base + ext
+
+def _uploads_enabled() -> bool:
+    return ALLOW_UPLOAD and not PHOTO_READONLY and PHOTO_DIR.resolve() == UPLOAD_DIR.resolve()
+
+
+def _gif_frame_count(source) -> int:
+    # Check frame rectangles before Pillow seeks to them. GIF disposal can
+    # allocate a buffer for a frame during seek(), before load() is called.
+    header = source.read(13)
+    if header[:6] not in (b"GIF87a", b"GIF89a"):
+        raise BadRequest("Invalid GIF header")
+    width, height, flags = struct.unpack("<HHB", header[6:11])
+    if width * height > MAX_FRAME_PIXELS:
+        raise RequestEntityTooLarge("Image frame exceeds the pixel limit")
+    if flags & 0x80:
+        source.seek(3 * (2 << (flags & 7)), os.SEEK_CUR)  # global color table
+
+    frames = 0
+    while (marker := source.read(1)) != b";":
+        if marker == b",":
+            x, y, frame_width, frame_height, flags = struct.unpack("<HHHHB", source.read(9))
+            if not frame_width or not frame_height or x + frame_width > width or y + frame_height > height:
+                raise BadRequest("GIF frame lies outside the logical screen")
+            frames += 1
+            if frames > MAX_FRAMES:
+                raise RequestEntityTooLarge("Image exceeds the frame limit")
+            if flags & 0x80:
+                source.seek(3 * (2 << (flags & 7)), os.SEEK_CUR)  # local color table
+        elif marker != b"!":
+            raise BadRequest("Invalid GIF block or missing trailer")
+
+        # Skip the LZW code size (image) or extension label (extension),
+        # then skip the length-prefixed data sub-blocks.
+        source.seek(1, os.SEEK_CUR)
+        while (length := source.read(1)) != b"\0":
+            if not length:
+                raise BadRequest("Truncated GIF block")
+            source.seek(length[0], os.SEEK_CUR)
+
+    if not frames:
+        raise BadRequest("GIF contains no frames")
+    return frames
+
+
+def _check_png_chunks(source, expected_animation_frames: int) -> None:
+    # Pillow verifies CRCs up to IEND and trusts the APNG header frame count.
+    # Check the terminal chunk and count the actual frame-control chunks.
+    source.seek(8)
+    frames = 0
+    while True:
+        length, kind = struct.unpack(">I4s", source.read(8))
+        if kind == b"IEND":
+            if length or source.read(4) != b"\xaeB\x60\x82":
+                raise BadRequest("Invalid PNG end chunk")
+            break
+        if kind == b"fcTL":
+            frames += 1
+            if frames > MAX_FRAMES:
+                raise RequestEntityTooLarge("Image exceeds the frame limit")
+        source.seek(length + 4, os.SEEK_CUR)
+    if frames != expected_animation_frames:
+        raise BadRequest("PNG animation frame count does not match its header")
+
+
+def _validate_upload_image(path: Path, expected_format: str) -> None:
+    with path.open("rb") as source:
+        try:
+            gif_frames = _gif_frame_count(source) if expected_format == "GIF" else None
+            with Image.open(source, formats=[expected_format]) as image:
+                if image.format != expected_format:
+                    raise BadRequest("Image format does not match its filename")
+                frames = gif_frames if gif_frames is not None else getattr(image, "n_frames", 1)
+                pixels = image.width * image.height
+                if pixels > MAX_FRAME_PIXELS:
+                    raise RequestEntityTooLarge("Image frame exceeds the pixel limit")
+                if frames > MAX_FRAMES:
+                    raise RequestEntityTooLarge("Image exceeds the frame limit")
+                if frames * pixels > MAX_TOTAL_PIXELS:
+                    raise RequestEntityTooLarge("Image exceeds the total pixel limit")
+                image.verify()
+                if expected_format == "PNG":
+                    animation_frames = frames - bool(image.info.get("default_image")) if "loop" in image.info else 0
+                    _check_png_chunks(source, animation_frames)
+
+            # verify() checks container integrity. Reopen to decode each frame.
+            with Image.open(source, formats=[expected_format]) as image:
+                for frame in range(frames):
+                    image.seek(frame)
+                    image.load()
+        except Image.DecompressionBombError as exc:
+            raise RequestEntityTooLarge("Image frame exceeds the pixel limit") from exc
+        except (OSError, SyntaxError, EOFError, ValueError, IndexError, struct.error) as exc:
+            raise BadRequest("Invalid image or mismatched file extension") from exc
+
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
@@ -384,7 +478,7 @@ def root():
     if not _has_view_access():
         html = render_template("locked.html")
         return Response(html, mimetype="text/html")
-    if ALLOW_UPLOAD_EFFECTIVE:
+    if _uploads_enabled():
         html = render_template("upload_form.html")
     else:
         note = f"Source: {PHOTO_DIR}"
@@ -528,28 +622,55 @@ def list_files():
 
 @app.post("/upload")
 def upload():
-    # Uploads disabled hard unless ALLOW_UPLOAD is set
-    if not ALLOW_UPLOAD_EFFECTIVE:
+    if not _uploads_enabled():
         return ("Uploads are disabled", 403)
-    if UPLOAD_PIN and request.headers.get("x-upload-pin","") != UPLOAD_PIN:
+    if UPLOAD_PIN and request.headers.get("X-Upload-Pin", "") != UPLOAD_PIN:
         return ("Forbidden", 403)
-    f = request.files.get("file")
-    if not f: return ("No file provided", 400)
-    f.stream.seek(0, os.SEEK_END)
-    size = f.stream.tell()
-    f.stream.seek(0)
+    content_length = request.content_length
+    if content_length is not None and content_length > MAX_UPLOAD_REQUEST_BYTES:
+        raise RequestEntityTooLarge()
+    # The multipart parser reads through EOF. With a terminated WSGI stream,
+    # Werkzeug raises 413 when it reads again after exhausting its byte limit.
+    # Leave one byte for the EOF check so bodies exactly at the cap are accepted.
+    request.max_content_length = MAX_UPLOAD_REQUEST_BYTES + 1
+    photo = request.files.get("file")
+    if not photo:
+        return ("No file provided", 400)
+    photo.stream.seek(0, os.SEEK_END)
+    size = photo.stream.tell()
+    photo.stream.seek(0)
     if size > MAX_BYTES:
         return ("File too large", 413)
-    safe = _safe_name(f.filename or "upload.jpg")
+    stem, ext = os.path.splitext(photo.filename)
+    ext = ext.lower()
+    expected_format = UPLOAD_FORMATS.get(ext)
+    if expected_format is None:
+        return ("Unsupported image extension", 400)
+    allowed_types = {"", "application/octet-stream", f"image/{expected_format.lower()}"}
+    if expected_format == "JPEG":
+        allowed_types.update(("image/jpg", "image/pjpeg"))
+    elif expected_format == "PNG":
+        allowed_types.add("image/x-png")
+    if photo.mimetype not in allowed_types:
+        return ("Image content type does not match its filename", 400)
+    stem = _slug_re.sub("_", stem)[:60] or "upload"
     caption = (request.form.get("caption") or "").strip()
     caption = _slug_re.sub("_", caption)[:40]
-    ts = _now_ms()
-    name = f"{ts}-{secrets.token_hex(3)}-{safe}"
     if caption:
-        stem, ext = os.path.splitext(safe)
-        name = f"{ts}-{secrets.token_hex(3)}-{stem}__{caption}{ext}"
-    outp = (UPLOAD_DIR / name)
-    f.save(outp)
+        stem = f"{stem}__{caption}"
+    name = f"{_now_ms()}-{secrets.token_hex(8)}-{stem}{ext}"
+    outp = UPLOAD_DIR / name
+    staged = tempfile.NamedTemporaryFile(
+        dir=UPLOAD_DIR, prefix=UPLOAD_TEMP_PREFIX, suffix=UPLOAD_TEMP_SUFFIX, delete=False
+    )
+    staged_path = Path(staged.name)
+    try:
+        with staged:
+            photo.save(staged)
+        _validate_upload_image(staged_path, expected_format)
+        staged_path.replace(outp)
+    finally:
+        staged_path.unlink(missing_ok=True)
     try:
         taken = _exif_taken_ms(outp)
         _metadb[name] = {"taken_ms": taken}
@@ -775,6 +896,9 @@ def download_zip():
 def serve_upload(filename):
     if not _has_view_access():
         return ("Forbidden", 403)
+    basename = Path(filename).name
+    if basename.startswith(UPLOAD_TEMP_PREFIX) and basename.endswith(UPLOAD_TEMP_SUFFIX):
+        abort(404)
     resp = send_from_directory(PHOTO_DIR, filename, conditional=True, etag=True)
     if not VIEW_PIN:
         resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
