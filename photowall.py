@@ -14,9 +14,10 @@ Env:
 """
 
 import os, re, json, time, secrets, mimetypes, tempfile, zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 from flask import Flask, request, send_from_directory, jsonify, Response, send_file, after_this_request, session, redirect, render_template, render_template_string
 
 # ---------- Paths & config ----------
@@ -59,6 +60,20 @@ UPLOAD_PIN = os.environ.get("UPLOAD_PIN", "").strip()
 ADMIN_PIN  = os.environ.get("ADMIN_PIN", "").strip()
 VIEW_PIN   = os.environ.get("VIEW_PIN", "").strip()
 SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
+event_deadline = os.environ.get("EVENT_EXPIRES_AT", "").strip()
+EVENT_EXPIRES_AT = None
+if event_deadline:
+    if not VIEW_PIN:
+        raise ValueError("EVENT_EXPIRES_AT requires VIEW_PIN")
+    if not SECRET_KEY or SECRET_KEY in {VIEW_PIN, UPLOAD_PIN, ADMIN_PIN}:
+        raise ValueError("EVENT_EXPIRES_AT requires a SECRET_KEY distinct from the PINs")
+    try:
+        deadline = datetime.fromisoformat(event_deadline.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("EVENT_EXPIRES_AT must be an ISO 8601 date and time with a timezone") from exc
+    if deadline.tzinfo is None:
+        raise ValueError("EVENT_EXPIRES_AT must include a timezone")
+    EVENT_EXPIRES_AT = deadline.timestamp()
 ALLOW_UPLOAD = os.environ.get("ALLOW_UPLOAD", "0").strip().lower() in {"1","true","yes","on"}
 ALLOW_UPLOAD_EFFECTIVE = ALLOW_UPLOAD and (PHOTO_DIR.resolve() == UPLOAD_DIR.resolve()) and (not PHOTO_READONLY)
 
@@ -297,6 +312,28 @@ def _list_subdirs(rel_base: str = "") -> list[str]:
     return out
 
 # ---------- Routes ----------
+_PRIVATE_VIEW_ENDPOINTS = {"root", "wall", "slideshow", "enter_pin", "serve_upload", "download_zip"}
+_EXPIRING_ENDPOINTS = _PRIVATE_VIEW_ENDPOINTS | {"list_dirs", "list_files"}
+
+
+@app.before_request
+def enforce_event_expiry():
+    if (
+        EVENT_EXPIRES_AT is not None
+        and request.endpoint in _EXPIRING_ENDPOINTS
+        and time.time() >= EVENT_EXPIRES_AT
+    ):
+        return ("Event has expired.", 410, {"Cache-Control": "no-store"})
+
+
+@app.after_request
+def prevent_private_cache(response):
+    if VIEW_PIN and request.endpoint in _PRIVATE_VIEW_ENDPOINTS:
+        response.headers["Cache-Control"] = "private, no-store"
+        response.vary.update(("Cookie", "X-View-Pin"))
+    return response
+
+
 def _has_view_access() -> bool:
     if not VIEW_PIN:
         return True
@@ -304,6 +341,29 @@ def _has_view_access() -> bool:
     if request.headers.get("x-view-pin", "") == VIEW_PIN:
         return True
     return bool(session.get("view_ok"))
+
+
+def _view_redirect_target(target: str) -> str:
+    control_chars = r"[\x00-\x1f\x7f]"
+    if re.search(control_chars, target):
+        return "/wall"
+
+    # Validate the path independently of the query and fragment. Keep the
+    # original URL for the redirect so its encoding and query are preserved.
+    path = re.split(r"[?#]", target, maxsplit=1)[0]
+    for _ in range(4):
+        if not path.startswith("/") or path.startswith("//") or "\\" in path:
+            return "/wall"
+        if re.search(control_chars, path):
+            return "/wall"
+        decoded = unquote(path)
+        if decoded == path:
+            return target
+        path = decoded
+
+    # Fall back if decoding does not settle within a few passes.
+    return "/wall"
+
 
 @app.post("/enter")
 def enter_pin():
@@ -316,11 +376,7 @@ def enter_pin():
         pin = data.get("pin")
     if (pin or "").strip() == VIEW_PIN:
         session["view_ok"] = True
-        # Prefer next param if provided and safe
-        nxt = request.args.get("next") or "/wall"
-        if not nxt.startswith("/"):
-            nxt = "/wall"
-        return redirect(nxt, code=303)
+        return redirect(_view_redirect_target(request.args.get("next", "")), code=303)
     return Response("Invalid PIN", status=403, mimetype="text/plain")
 
 @app.get("/")
@@ -717,8 +773,11 @@ def download_zip():
 
 @app.get("/uploads/<path:filename>")
 def serve_upload(filename):
+    if not _has_view_access():
+        return ("Forbidden", 403)
     resp = send_from_directory(PHOTO_DIR, filename, conditional=True, etag=True)
-    resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
+    if not VIEW_PIN:
+        resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
     return resp
 
 if __name__ == "__main__":

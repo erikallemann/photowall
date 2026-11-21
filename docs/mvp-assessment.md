@@ -55,7 +55,9 @@ Without the export window, temporary event costs are about $0.33 and $0.67. At 5
 
 Hosted Stripe Checkout is one candidate. Swedish standard EEA card pricing is 1.5% + SEK 1.80, about SEK 3.29 on 99 SEK and SEK 3.74 on 129 SEK. At a planning assumption of 10 SEK/USD, temporary infrastructure plus that card fee is about SEK 8.31 or SEK 12.19 per event, excluding monthly overhead and the other costs above. This is a contribution-cost estimate. Verify taxes, refunds, chargebacks, support effort and actual traffic before judging margins. A self-serve buy-to-ready path and reliable automatic cleanup matter more to the choice than the modeled compute difference at early volumes. [Stripe Sweden pricing](https://stripe.com/se/pricing), [Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment).
 
-## Commercial blockers
+## Commercial blockers at the review baseline
+
+For work merged since this review and outstanding deployment checks, see the [implementation plan](mvp-implementation-plan.md#first-three-implementation-prs).
 
 | Priority | Finding | Required outcome |
 | --- | --- | --- |
