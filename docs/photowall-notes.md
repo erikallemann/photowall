@@ -66,7 +66,7 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 * `POST /delete` — Delete one file. Header `X-Admin-Pin: <pin>` must match `ADMIN_PIN`. Returns `204` on success.
 * `POST /rescan` — Re-parse EXIF for all images. Header `X-Admin-Pin` required.
 * `GET /download` — Creates a ZIP of uploaded images plus a self-contained `index.html` gallery and streams it (temp file cleaned up after send). Extract the ZIP and open `index.html` locally for thumbnails, filename captions, keyboard navigation, slideshow, and full-screen viewing where supported. No network connection or server is needed. Original image bytes and filenames are preserved; no embedded metadata is written. The extracted gallery has no PIN gate. Disabled when browsing an external `PHOTO_ROOT`.
-* `GET /uploads/<filename>` — Serves original image (with long Cache-Control).
+* `GET /uploads/<filename>` — Serves the photo subject to viewer access. Tiles and slideshow use these same URLs. PIN-protected responses use `private, no-store`.
 
 ### Sorting Logic
 
@@ -109,7 +109,8 @@ This document summarizes the **Photowall** photo wall built with Flask, Gunicorn
 * `PHOTO_RECURSIVE` — set to `1/true` to scan `PHOTO_ROOT` recursively (default: `1` when `PHOTO_ROOT` is set).
 * `PHOTO_READONLY` — set to `0/false` to allow mutations when browsing `uploads/` (default: read-only when `PHOTO_ROOT` points elsewhere).
 * `PHOTO_SKIP_HIDDEN` — set to `0/false` to include dotfiles/dotfolders (default: `1`).
-* `VIEW_PIN` — when set, gates viewer routes (`/`, `/wall`, `/slideshow`, `/list`, `/download`). Users can enter the PIN once (session cookie) or pass header `X-View-Pin` for programmatic access.
+* `VIEW_PIN` — gates viewer pages, photo lists, direct images and ZIP export. Enter the PIN once per browser session or pass the `X-View-Pin` header for programmatic requests.
+* `EVENT_EXPIRES_AT` — optional viewer cutoff for a PIN-protected event. Set an ISO 8601 date/time with an explicit timezone, such as `2026-12-01T20:00:00Z`. Startup requires a valid date, a `VIEW_PIN`, and a `SECRET_KEY` distinct from the PINs.
 * `SECRET_KEY` — optional Flask secret for sessions; if unset, falls back to `ADMIN_PIN`/`UPLOAD_PIN`/random.
 * `PORT` — optional, defaults to 8081.
 
@@ -158,40 +159,17 @@ ALLOW_UPLOAD=0
 
 ---
 
-## 7) Caddy Reverse Proxy (TLS + static `/uploads`)
+## 7) Caddy Reverse Proxy
 
-Site block for `example.com` (key bits):
+Use the [checked-in Caddy example](../deploy/caddy/Caddyfile.example). It sends media requests to Flask.
 
-```caddy
-example.com {
-    encode zstd gzip
+### Private media and expiry
 
-    # Serve uploaded files directly (faster than proxying to Flask)
-    handle_path /uploads/* {
-        # If using PHOTO_ROOT, set this to that folder instead of uploads/
-        root * ~/photowall/uploads
-        file_server
-        header Cache-Control "public, max-age=604800, immutable"
-    }
-
-    # App routes
-    reverse_proxy 127.0.0.1:8081
-
-    # Optional access log
-    log {
-        format console
-        output file /var/log/caddy/photowall_access.log {
-            roll_size 10MiB
-            roll_keep 7
-            roll_keep_for 168h
-        }
-    }
-}
-```
-
-### Optional: Lock down static assets too
-
-The app-level `VIEW_PIN` prevents discovery of content via UI and JSON (`/`, `/wall`, `/slideshow`, `/list`, `/download`). Direct image URLs under `/uploads/` remain public for performance and long-lived caching. If you want full lockdown, enforce auth at the reverse proxy for those paths as well (e.g., Caddy `basicauth` or a simple PIN form).
+- Configure `VIEW_PIN` before publishing the event. Set a stable, independently generated `SECRET_KEY` across workers so browser sessions work across requests.
+- Route originals, wall tiles, slideshow images and ZIPs through Flask. Keep photo directories out of public file-server roots. Bypass caching for protected event hosts at the CDN and any other proxy, including URLs with query strings. Disable any image transformation or direct storage route that would serve copies outside the app's access checks. [Cloudflare cache rules](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/)
+- When converting a previously public instance, use a fresh event hostname for protected content, remove access through the old public hostname and purge its cached URLs, including query variants. Edge purge affects CDN copies. Previously downloaded files, browser copies and screenshots may still exist on viewers' devices. [Cloudflare cache invalidation](https://developers.cloudflare.com/cache/guides/invalidate-cache/)
+- After `EVENT_EXPIRES_AT`, new viewer requests receive HTTP 410 even with a valid PIN or session. An open wall or slideshow shows the expiry message on its next successful poll. The cutoff controls viewer access. Storage cleanup and any previously started downloads need to be managed separately.
+- Verify the production hostname with a synthetic photo before an event. Load the wall, slideshow and ZIP with a valid PIN, then request the same URLs in a fresh session. Check for HTTP 403 and `private, no-store` on protected media denials. Check that neither response is a CDN cache hit. Set a short deadline and repeat with both sessions after it passes. Expect HTTP 410 and no image or ZIP bytes. Also check that no direct origin or static-file URL returns the photo.
 
 Reload:
 
@@ -236,7 +214,7 @@ sudo systemctl reload caddy
 ## 10) Performance Tips
 
 * Gunicorn: `-w 4 --threads 2` on a 1–2 vCPU VM is fine for 10–20 concurrent users.
-* Let **Caddy** serve `/uploads` directly to offload Python.
+* Keep protected photos behind Flask even when Caddy or a CDN serves the site.
 * Optional downscale on upload to 2560px long edge and re-encode JPEG quality \~85 to reduce bandwidth.
 * Client uses `loading="lazy"` and periodic JSON fetches (`no-store`) to minimize bytes.
 

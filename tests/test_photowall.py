@@ -1,5 +1,7 @@
 import io
+import time
 from html.parser import HTMLParser
+from types import SimpleNamespace
 from urllib.parse import unquote
 import zipfile
 
@@ -24,6 +26,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(photowall, "ALLOW_UPLOAD_EFFECTIVE", False)
     monkeypatch.setattr(photowall, "UPLOAD_PIN", "")
     monkeypatch.setattr(photowall, "VIEW_PIN", "")
+    monkeypatch.setattr(photowall, "EVENT_EXPIRES_AT", None)
     monkeypatch.setattr(photowall, "METADB_PATH", metadb_path)
     monkeypatch.setattr(photowall, "_metadb", {})
     monkeypatch.setattr(photowall, "_scan_cache", {})
@@ -47,6 +50,98 @@ def test_home_wall_and_slideshow_render(client):
     assert client.get("/").status_code == 200
     assert client.get("/wall").status_code == 200
     assert client.get("/slideshow").status_code == 200
+
+
+def test_public_photo_keeps_immutable_cache(client):
+    _seed_image("public.jpg")
+    response = client.get("/uploads/public.jpg")
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "public, max-age=604800, immutable"
+
+
+@pytest.mark.parametrize("library_mode", [False, True])
+def test_private_photo_access_including_range_and_revalidation(client, monkeypatch, tmp_path, library_mode):
+    monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
+    photo = _small_jpeg_bytes()
+    if library_mode:
+        library = tmp_path / "library"
+        folder = library / "folder"
+        folder.mkdir(parents=True)
+        (folder / "private.jpg").write_bytes(photo)
+        monkeypatch.setattr(photowall, "PHOTO_DIR", library)
+        monkeypatch.setattr(photowall, "PHOTO_READONLY", True)
+        url = "/uploads/folder/private.jpg"
+    else:
+        _seed_image("private.jpg", photo)
+        url = "/uploads/private.jpg"
+
+    view_header = {"X-View-Pin": "viewer"}
+    original = client.get(url, headers=view_header)
+    assert original.status_code == 200
+    assert original.data == photo
+    assert original.headers["Cache-Control"] == "private, no-store"
+    assert {"Cookie", "X-View-Pin"} <= set(original.vary)
+
+    cache_headers = {"If-None-Match": original.headers["ETag"]}
+    range_headers = {"Range": "bytes=0-3"}
+    for headers in ({}, {"X-View-Pin": "wrong"}, cache_headers, range_headers):
+        denied = client.get(url, headers=headers)
+        assert denied.status_code == 403
+        assert denied.headers["Cache-Control"] == "private, no-store"
+        assert denied.data == b"Forbidden"
+    assert client.head(url).status_code == 403
+
+    assert client.post("/enter", data={"pin": "viewer"}).status_code == 303
+    assert client.get(url + "?v=123").data == photo
+    for headers, status, expected_bytes in ((cache_headers, 304, b""), (range_headers, 206, photo[:4])):
+        response = client.get(url, headers=headers)
+        assert response.status_code == status
+        assert response.headers["Cache-Control"] == "private, no-store"
+        assert response.data == expected_bytes
+
+
+def test_viewer_access_ends_at_event_deadline(client, monkeypatch):
+    monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
+    deadline = time.time() + 60
+    now = deadline - 1
+    monkeypatch.setattr(photowall, "EVENT_EXPIRES_AT", deadline)
+    monkeypatch.setattr(photowall, "time", SimpleNamespace(time=lambda: now, strftime=time.strftime))
+    _seed_image("event.jpg")
+
+    denied_zip = client.get("/download")
+    assert denied_zip.status_code == 403
+    assert denied_zip.headers["Cache-Control"] == "private, no-store"
+    assert client.post("/enter", data={"pin": "viewer"}).status_code == 303
+    for page, script in (("/wall", "wall.js"), ("/slideshow", "slideshow.js")):
+        response = client.get(page)
+        assert response.status_code == 200
+        assert f"/static/{script}" in response.get_data(as_text=True)
+    listing = client.get("/list")
+    assert listing.headers["Cache-Control"] == "no-store"
+    item = listing.json["items"][0]
+    original = client.get(item["url"])
+    tile_url = f"{item['url']}?v={item['ts']}"
+    assert original.status_code == 200
+    assert client.get(tile_url).data == original.data
+    archive = client.get("/download")
+    assert archive.status_code == 200
+    assert archive.headers["Cache-Control"] == "private, no-store"
+
+    now = deadline
+    with photowall.app.test_client() as guest:
+        for viewer in (client, guest):
+            for path in ("/", "/wall", "/slideshow", "/dirs", "/list", "/download", item["url"], tile_url):
+                expired = viewer.get(path)
+                assert expired.status_code == 410
+                assert expired.cache_control.no_store
+                assert expired.data == b"Event has expired."
+        for headers in (
+            {"X-View-Pin": "viewer", "If-None-Match": original.headers["ETag"]},
+            {"X-View-Pin": "viewer", "Range": "bytes=0-3"},
+        ):
+            assert guest.get(tile_url, headers=headers).status_code == 410
+        assert guest.post("/enter", data={"pin": "viewer"}).status_code == 410
+    assert (photowall.UPLOAD_DIR / "event.jpg").exists()
 
 
 @pytest.mark.parametrize(

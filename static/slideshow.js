@@ -39,6 +39,10 @@ async function refreshList(){
   try{
     const dirsPart = dirs.length ? `&dirs=${encodeURIComponent(dirs.join(','))}` : (dir ? `&dir=${encodeURIComponent(dir)}` : '');
     const r = await fetch(`/list?limit=400&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}${dirsPart}`, {cache:'no-store'});
+    if (r.status === 410) {
+      window.location.reload();
+      return;
+    }
     const d = await r.json();
     const incoming = d.items||[];
     if (!items.length){ items = incoming.slice(); if (shuffle) items.sort(()=>Math.random()-0.5); idx = 0; show(idx); return; }
