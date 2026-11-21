@@ -52,6 +52,22 @@ def test_home_wall_and_slideshow_render(client):
     assert client.get("/slideshow").status_code == 200
 
 
+def test_readiness_probes_event_storage(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(photowall, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
+    monkeypatch.setattr(photowall, "EVENT_EXPIRES_AT", 0)
+    ready = client.get("/readyz")
+    assert ready.status_code == 204
+    assert ready.headers["Cache-Control"] == "no-store"
+    assert list(tmp_path.iterdir()) == [photowall.UPLOAD_DIR]
+    assert list(photowall.UPLOAD_DIR.iterdir()) == []
+
+    monkeypatch.setattr(photowall, "PHOTO_DIR", tmp_path / "missing")
+    unavailable = client.get("/readyz")
+    assert unavailable.status_code == 503
+    assert unavailable.headers["Cache-Control"] == "no-store"
+
+
 def test_public_photo_keeps_immutable_cache(client):
     _seed_image("public.jpg")
     response = client.get("/uploads/public.jpg")

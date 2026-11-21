@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!photowall.py
+!static/
+!static/**
+!templates/
+!templates/**
+!deploy/
+!deploy/requirements-container.txt

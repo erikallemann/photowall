@@ -22,7 +22,8 @@ from flask import Flask, request, send_from_directory, jsonify, Response, send_f
 
 # ---------- Paths & config ----------
 BASE = Path(__file__).resolve().parent
-UPLOAD_DIR = BASE / "uploads"
+DATA_DIR = (BASE / os.environ.get("PHOTOWALL_DATA_DIR", "").strip()).resolve()
+UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 PHOTO_ROOT = os.environ.get("PHOTO_ROOT", "").strip()
@@ -78,7 +79,7 @@ ALLOW_UPLOAD = os.environ.get("ALLOW_UPLOAD", "0").strip().lower() in {"1","true
 ALLOW_UPLOAD_EFFECTIVE = ALLOW_UPLOAD and (PHOTO_DIR.resolve() == UPLOAD_DIR.resolve()) and (not PHOTO_READONLY)
 
 # Simple metadata cache so we don't parse EXIF on every request
-METADB_PATH = BASE / "metadata_index.json"
+METADB_PATH = DATA_DIR / "metadata_index.json"
 try:
     _metadb = json.loads(METADB_PATH.read_text("utf-8")) if METADB_PATH.exists() else {}
 except Exception:
@@ -727,6 +728,21 @@ OFFLINE_GALLERY_HTML = """<!doctype html>
 </html>
 """
 
+@app.get("/readyz")
+def readiness():
+    """Check the storage used by this worker."""
+    try:
+        for directory in (DATA_DIR, UPLOAD_DIR):
+            with tempfile.TemporaryFile(dir=directory) as probe:
+                probe.write(b"ready")
+                probe.flush()
+        with os.scandir(PHOTO_DIR) as entries:
+            next(entries, None)
+    except OSError:
+        return ("", 503, {"Cache-Control": "no-store"})
+    return ("", 204, {"Cache-Control": "no-store"})
+
+
 @app.get("/download")
 def download_zip():
     if not _has_view_access():
@@ -734,10 +750,10 @@ def download_zip():
     if PHOTO_DIR.resolve() != UPLOAD_DIR.resolve():
         return ("ZIP download is only supported for uploads/ in this mode", 409)
     """Create a ZIP of all images in /uploads and return it as attachment.
-       The ZIP is written to a temp dir under BASE and deleted after response.
+       The ZIP is written to a temp dir under DATA_DIR and deleted after response.
     """
     ts_str = time.strftime("%Y%m%d-%H%M%S")
-    tmpdir = tempfile.mkdtemp(prefix="photowall_zip_", dir=str(BASE))
+    tmpdir = tempfile.mkdtemp(prefix="photowall_zip_", dir=DATA_DIR)
     zpath = Path(tmpdir) / f"photowall-{ts_str}.zip"
     # Build zip
     photos = []
