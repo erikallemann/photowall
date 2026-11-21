@@ -121,6 +121,10 @@ folderSearch.oninput = ()=> renderFolderList();
 async function fetchList(){
   const dirsPart = dirs.length ? `&dirs=${encodeURIComponent(dirs.join(','))}` : '';
   const r = await fetch(`/list?limit=400&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}${dirsPart}`, {cache:'no-store'});
+  if (r.status === 410) {
+    window.location.reload();
+    return [];
+  }
   const d = await r.json();
   return d.items || [];
 }

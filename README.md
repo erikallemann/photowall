@@ -46,7 +46,8 @@ Environment variables read at startup:
 
 - `ADMIN_PIN` – required header `X-Admin-Pin` on `/delete` and `/rescan`.
 - `UPLOAD_PIN` – optional header `X-Upload-Pin` on `/upload`.
-- `VIEW_PIN` – gates `/`, `/wall`, `/slideshow`, `/list`, and `/download`; users must submit the PIN once per browser session.
+- `VIEW_PIN` – gates the viewer pages, photo lists, direct image URLs, and ZIP export. Enter the PIN once per browser session or use `X-View-Pin` for programmatic requests.
+- `EVENT_EXPIRES_AT` – optional viewer cutoff for a PIN-protected event, for example `2026-12-01T20:00:00Z`. Requires `VIEW_PIN` and a separate, securely generated `SECRET_KEY`. At that time, viewer pages, PIN entry, lists, photos and ZIP export return HTTP 410. File deletion is a separate operation.
 - `ALLOW_UPLOAD` – set to `1/true/on` to enable uploads; otherwise `/upload` returns HTTP 403.
 - `PHOTO_ROOT` – optional folder to *browse* instead of `uploads/` (supports absolute paths like `/mnt/n/erik/dropbox/storage/pics/`). When set, the app defaults to recursive scanning and becomes read-only by default.
 - `PHOTO_RECURSIVE` – set to `1/true/on` to scan `PHOTO_ROOT` recursively (default: `1` when `PHOTO_ROOT` is set, else `0`).
@@ -89,7 +90,7 @@ systemctl --user enable --now photowall
 journalctl --user -u photowall -f
 ```
 
-6. Point your TLS-terminating proxy (e.g. Caddy or Nginx) at `127.0.0.1:8081`. An example Caddyfile lives in `deploy/caddy/Caddyfile.example`.
+6. Point your TLS-terminating proxy (e.g. Caddy or Nginx) at `127.0.0.1:8081`. An example Caddyfile lives in `deploy/caddy/Caddyfile.example`. For protected events, route all media through Flask and bypass CDN caching. See the [private media deployment notes](docs/photowall-notes.md#private-media-and-expiry).
 
 ## API overview
 
@@ -104,7 +105,7 @@ journalctl --user -u photowall -f
 | `/rescan` | POST | Rebuild EXIF cache; header `X-Admin-Pin`. |
 | `/list` | GET | JSON listing, supports `limit`, `order`, `sort`, `before`. |
 | `/download` | GET | Streams a ZIP archive of `uploads/` (disabled when browsing an external `PHOTO_ROOT`). |
-| `/uploads/<filename>` | GET | Serves stored assets with aggressive caching. |
+| `/uploads/<filename>` | GET | Serves stored assets. PIN-protected responses use `private, no-store`. Public assets remain cacheable. |
 
 ## Next steps
 
