@@ -17,7 +17,7 @@ import os, re, json, time, secrets, mimetypes, tempfile, zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 from flask import Flask, request, send_from_directory, jsonify, Response, send_file, after_this_request, session, redirect, render_template, render_template_string
 
 # ---------- Paths & config ----------
@@ -342,6 +342,29 @@ def _has_view_access() -> bool:
         return True
     return bool(session.get("view_ok"))
 
+
+def _view_redirect_target(target: str) -> str:
+    control_chars = r"[\x00-\x1f\x7f]"
+    if re.search(control_chars, target):
+        return "/wall"
+
+    # Validate the path independently of the query and fragment. Keep the
+    # original URL for the redirect so its encoding and query are preserved.
+    path = re.split(r"[?#]", target, maxsplit=1)[0]
+    for _ in range(4):
+        if not path.startswith("/") or path.startswith("//") or "\\" in path:
+            return "/wall"
+        if re.search(control_chars, path):
+            return "/wall"
+        decoded = unquote(path)
+        if decoded == path:
+            return target
+        path = decoded
+
+    # Fall back if decoding does not settle within a few passes.
+    return "/wall"
+
+
 @app.post("/enter")
 def enter_pin():
     if not VIEW_PIN:
@@ -353,11 +376,7 @@ def enter_pin():
         pin = data.get("pin")
     if (pin or "").strip() == VIEW_PIN:
         session["view_ok"] = True
-        # Prefer next param if provided and safe
-        nxt = request.args.get("next") or "/wall"
-        if not nxt.startswith("/"):
-            nxt = "/wall"
-        return redirect(nxt, code=303)
+        return redirect(_view_redirect_target(request.args.get("next", "")), code=303)
     return Response("Invalid PIN", status=403, mimetype="text/plain")
 
 @app.get("/")

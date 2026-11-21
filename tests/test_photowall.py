@@ -280,6 +280,49 @@ def test_locked_view_page_links_locked_css(client, monkeypatch):
     assert 'href="/static/locked.css"' in html
 
 
+@pytest.mark.parametrize("pin_payload", [{"data": {"pin": "viewer"}}, {"json": {"pin": "viewer"}}])
+@pytest.mark.parametrize(
+    "target",
+    [
+        "https://example.invalid/",
+        "slideshow",
+        "//example.invalid/",
+        r"/\example.invalid/",
+        "/%2Fexample.invalid/",
+        "/%5Cexample.invalid/",
+        "/%252Fexample.invalid/",
+        "/\t/slideshow",
+    ],
+)
+def test_enter_pin_uses_wall_for_unsafe_redirect(client, monkeypatch, target, pin_payload):
+    monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
+
+    response = client.post("/enter", query_string={"next": target}, **pin_payload)
+
+    assert response.status_code == 303
+    assert response.headers["Location"] == "/wall"
+    with client.session_transaction() as session:
+        assert session["view_ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("target", "location"),
+    [
+        (None, "/wall"),
+        ("/slideshow?dir=party%2Fday%201#photos", "/slideshow?dir=party%2Fday%201#photos"),
+        ("/photos/caf%C3%A9", "/photos/caf%C3%A9"),
+    ],
+)
+def test_enter_pin_preserves_local_redirect(client, monkeypatch, target, location):
+    monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
+    query = {"next": target} if target is not None else {}
+
+    response = client.post("/enter", query_string=query, data={"pin": "viewer"})
+
+    assert response.status_code == 303
+    assert response.headers["Location"] == location
+
+
 def test_list_returns_json_items(client):
     _seed_image("1700000000000-abcdef-party.jpg")
 
