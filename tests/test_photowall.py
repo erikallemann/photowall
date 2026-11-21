@@ -1,8 +1,15 @@
+import errno
 import io
+import os
+import shutil
+import socket
 import struct
+import subprocess
+import sys
 import time
 import zlib
 from html.parser import HTMLParser
+from http.client import HTTPConnection
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import unquote
@@ -446,6 +453,76 @@ def test_upload_file_size_boundary(upload_client, extra_bytes, status):
         _assert_no_upload(upload_client)
 
 
+def test_gunicorn_upload_request_size_boundary(tmp_path):
+    shutil.copy2(photowall.__file__, tmp_path)
+    try:
+        listener = socket.socket()
+        with listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            fd = listener.fileno()
+            server = subprocess.Popen(
+                [sys.executable, "-m", "gunicorn", "--bind", f"fd://{fd}", "photowall:app"],
+                cwd=tmp_path, pass_fds=(fd,),
+                env={"PATH": os.defpath, "ALLOW_UPLOAD": "1", "XDG_RUNTIME_DIR": str(tmp_path)},
+            )
+    except OSError as exc:
+        if exc.errno in (errno.EACCES, errno.EPERM):
+            pytest.skip(f"Gunicorn HTTP test requires a loopback listener: {exc}")
+        raise
+
+    boundary = "gunicorn-smoke"
+    file_header = (
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="party.png"\r\n'
+        "Content-Type: image/png\r\n\r\n"
+    ).encode()
+    caption_header = f'\r\n--{boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n'.encode()
+    closing = f"\r\n--{boundary}--\r\n".encode()
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    try:
+        photo = _png_with_size(10 * 1024 * 1024)
+        cap = 10_551_296
+        padding = b"x" * (cap - len(file_header + photo + caption_header + closing))
+        body = file_header + photo + caption_header + padding + closing
+        assert len(body) == cap
+        for chunked in (False, True):
+            for extra in (b"", b"x"):
+                expected = 413 if extra else 201
+                payload = body[:-len(closing)] + extra + closing if extra else body
+                connection = HTTPConnection("127.0.0.1", port, timeout=15)
+                try:
+                    if chunked:
+                        chunks = (payload[i:i + 65536] for i in range(0, len(payload), 65536))
+                        try:
+                            connection.request("POST", "/upload", chunks, headers, encode_chunked=True)
+                        except (BrokenPipeError, ConnectionResetError):
+                            # Gunicorn can send 413 before the final chunk terminator.
+                            if not extra:
+                                raise
+                    elif extra:
+                        # A declared oversized body must be rejected before reading any data.
+                        connection.request("POST", "/upload", headers={**headers, "Content-Length": str(len(payload))})
+                    else:
+                        connection.request("POST", "/upload", body, headers)
+                    response = connection.getresponse()
+                    assert response.status == expected, f"chunked={chunked}, body size={len(payload)}"
+                    response.read()
+                finally:
+                    connection.close()
+
+        saved = list((tmp_path / "uploads").iterdir())
+        assert len(saved) == 2
+        assert all(path.read_bytes() == photo for path in saved)
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait()
+
+
 def test_oversized_request_is_rejected_before_multipart_is_read(upload_client):
     class UnreadableBody(io.BytesIO):
         def read(self, size=-1):
@@ -486,7 +563,7 @@ def test_streamed_request_is_bounded_without_content_length(upload_client):
     )
 
     assert response.status_code == 413
-    assert stream.tell() == photowall.MAX_UPLOAD_REQUEST_BYTES
+    assert stream.tell() == photowall.MAX_UPLOAD_REQUEST_BYTES + 1
     _assert_no_upload(upload_client)
 
 

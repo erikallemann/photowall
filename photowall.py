@@ -626,7 +626,13 @@ def upload():
         return ("Uploads are disabled", 403)
     if UPLOAD_PIN and request.headers.get("X-Upload-Pin", "") != UPLOAD_PIN:
         return ("Forbidden", 403)
-    request.max_content_length = MAX_UPLOAD_REQUEST_BYTES
+    content_length = request.content_length
+    if content_length is not None and content_length > MAX_UPLOAD_REQUEST_BYTES:
+        raise RequestEntityTooLarge()
+    # The multipart parser reads through EOF. With a terminated WSGI stream,
+    # Werkzeug raises 413 when it reads again after exhausting its byte limit.
+    # Leave one byte for the EOF check so bodies exactly at the cap are accepted.
+    request.max_content_length = MAX_UPLOAD_REQUEST_BYTES + 1
     photo = request.files.get("file")
     if not photo:
         return ("No file provided", 400)

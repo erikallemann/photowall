@@ -65,7 +65,7 @@ For commercial hosting, see the [MVP assessment](mvp-assessment.md) and [impleme
 * `POST /upload` — **Disabled by default**; returns `403` unless `ALLOW_UPLOAD=1` set.
 
   * When enabled, send one `file` and an optional `caption` as multipart form data. Include `X-Upload-Pin` if `UPLOAD_PIN` is configured. Uploads require a writable local `uploads/` library.
-  * The file limit is 10 MiB (10,485,760 bytes). The request body limit is set before multipart parsing at 10 MiB plus 64 KiB (10,551,296 bytes) for multipart headers, boundaries and fields. A reverse proxy with its own body cap needs to allow the multipart overhead too.
+  * The file limit is 10 MiB (10,485,760 bytes). The inclusive request body limit is 10 MiB plus 64 KiB (10,551,296 bytes), including multipart headers, boundaries and fields. This applies to both fixed-length and chunked uploads. A reverse proxy with its own body cap needs to allow the multipart overhead too.
   * Pillow verifies and fully decodes JPEG (`.jpg` or `.jpeg`), PNG, GIF and WebP. The filename extension must match the decoded format. A supplied part media type must also match, with `application/octet-stream` accepted as a generic label. The limits are 25 million canvas pixels per frame, 100 frames and 60 million canvas pixels summed across frames.
   * Invalid images return `400` and exceeded limits return `413`. Validated originals are published atomically in `uploads/` and return `201 OK`. The app removes staging files when a request fails.
 * `POST /delete` — Delete one file. Header `X-Admin-Pin: <pin>` must match `ADMIN_PIN`. Returns `204` on success.
