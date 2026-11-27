@@ -1,31 +1,33 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Upload Photos</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='upload_form.css') }}"></head>
 <body>
 <main>
   <header>
-    <h1>Photowall</h1>
-    <nav class="actions">
-      <a class="muted" href="/wall">Wall</a>
-      <a class="muted" href="/slideshow">Slideshow</a>
-      <a class="muted" href="/download">Download ZIP</a>
+    <a class="wordmark" href="/wall">Photowall</a>
+    <nav class="actions" aria-label="Display">
+      <a href="/wall">Photo wall</a>
+      <a href="/slideshow">Slideshow</a>
     </nav>
   </header>
+  <h1>Add a photo</h1>
   <form id="uploadForm">
-    <p class="muted">Choose a photo, add an optional caption, and enter the upload PIN if required. Max 10&nbsp;MB. Accepted formats: JPG/PNG/GIF/WebP.</p>
     <label>Photo
-      <input id="file" name="file" type="file" accept="image/*" required>
+      <input id="file" name="file" type="file" accept="image/*" aria-describedby="photo-formats" required>
+      <span id="photo-formats" class="muted">JPG, PNG, GIF or WebP · Up to 10 MB</span>
     </label>
     <label>Caption (optional, 40 characters)
       <input id="caption" name="caption" maxlength="40" placeholder="e.g. Couple on stage">
     </label>
     <label>PIN (if required)
-      <input id="pin" maxlength="64" autocomplete="off" placeholder="Enter upload PIN">
+      <input id="pin" type="password" maxlength="64" autocomplete="off" placeholder="Enter upload PIN">
     </label>
-    <button type="submit">Upload</button>
-    <div id="status"></div>
+    <button class="primary" type="submit">Upload photo</button>
+    <div id="status" role="status"></div>
   </form>
+  <a class="archive muted" href="/download">Download ZIP</a>
 </main>
 <script src="{{ url_for('static', filename='upload_form.js') }}"></script>
 </body></html>
