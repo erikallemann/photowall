@@ -2,63 +2,83 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Photo Wall</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='wall.css') }}"></head>
-<body>
-<header>
-  <div>
-    <h1>Photo Wall</h1>
-    <div class="muted">Choose sorting and layout. Updates automatically.</div>
-  </div>
-  <div class="wall-controls">
-    <a href="/" class="muted home-link">Home</a>
-    <details id="folderDetails">
-      <summary class="muted">Folders</summary>
-      <div class="folderbox">
-        <div>
-          <div class="muted folder-note">Pick one or more folders under the photo root.</div>
-          <div class="chipbar folder-actions">
-            <span class="chip" id="selCount">Selected: 0</span>
-            <button id="clearFolders" type="button">Clear</button>
+<link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='wall.css') }}">
+</head>
+<body{% if projector %} class="projector"{% endif %}>
+<header class="wall-header">
+  {% if not projector %}
+  <nav class="wall-nav" aria-label="Main">
+    <a class="wordmark" href="/">Photowall</a>
+    {% if can_upload %}<a class="button primary" href="/">Add photo</a>{% endif %}
+  </nav>
+  {% endif %}
+  <div class="wall-heading">
+    <div>
+      <h1>Photo wall</h1>
+      <p id="status" role="status">Loading photos…</p>
+    </div>
+    <nav class="display-nav" aria-label="Display">
+      {% if projector %}
+      <a class="button" href="/wall">Guest wall</a>
+      <a class="button" href="/slideshow">Slideshow</a>
+      <button id="fullscreen" class="primary" type="button">Full screen</button>
+      {% else %}
+      <a class="button" href="/slideshow">Slideshow</a>
+      <a class="button" href="/wall?display=1">Big screen</a>
+      <details id="displayOptions">
+        <summary class="button">Options</summary>
+        <div class="wall-controls">
+          <label for="sort">Sort by</label>
+          <select id="sort">
+            <option value="upload">Uploaded</option>
+            <option value="taken">Taken</option>
+          </select>
+          <label for="order">Order</label>
+          <select id="order">
+            <option value="desc">Newest first</option>
+            <option value="asc">Oldest first</option>
+          </select>
+          <label for="layout">Layout</label>
+          <select id="layout">
+            <option value="columns">Masonry</option>
+            <option value="rows">Grid</option>
+          </select>
+          <label class="check"><input type="checkbox" id="uniform"> Uniform tiles</label>
+          <details id="folderDetails">
+            <summary>Folders</summary>
+            <div class="folder-actions">
+              <span id="selCount">Selected: 0</span>
+              <button id="clearFolders" type="button">Clear</button>
+            </div>
+            <label for="folderSearch" class="visually-hidden">Filter folders</label>
+            <input id="folderSearch" type="search" placeholder="Filter folders">
+            <div class="folderlist" id="folderList" aria-label="Folder list"></div>
+          </details>
+          <div class="wall-actions">
+            <button id="refresh" type="button">Refresh</button>
+            <button id="toggle" type="button" aria-pressed="true">Auto-refresh</button>
+            {% if show_download %}<a class="button" href="/download">Download ZIP</a>{% endif %}
           </div>
-          <input id="folderSearch" type="text" placeholder="Filter folders...">
         </div>
-        <div class="folderlist" id="folderList" aria-label="Folder list"></div>
-      </div>
-    </details>
-    <label class="muted" for="sort">Sort by</label>
-    <select id="sort">
-      <option value="upload">Uploaded</option>
-      <option value="taken">Taken (EXIF/IPTC)</option>
-    </select>
-    <label class="muted" for="order">Order</label>
-    <select id="order">
-      <option value="desc">Descending</option>
-      <option value="asc">Ascending</option>
-    </select>
-    <label class="muted" for="layout">Layout</label>
-    <select id="layout">
-      <option value="columns">Columns</option>
-      <option value="rows">Rows (grid)</option>
-    </select>
-    <label class="chk"><input type="checkbox" id="uniform"> Uniform tiles</label>
-    {% if show_download %}<a class="muted" href="/download" title="Download all photos as a ZIP archive">Download ZIP</a>{% endif %}
-    <button id="scrollL" title="Scroll up">▲</button>
-    <button id="scrollR" title="Scroll down">▼</button>
-    <button id="refresh">Refresh</button>
-    <button id="toggle">Auto: On</button>
+      </details>
+      {% endif %}
+    </nav>
   </div>
 </header>
-<main>
-  <div id="grid" class="container columns" aria-live="polite"></div>
-  <p id="status" class="muted"></p>
+<main class="gallery">
+  <div id="grid" class="container columns"></div>
+  <div id="empty" class="empty" hidden>
+    <h2>No photos yet</h2>
+    {% if can_upload and not projector %}<a class="button primary" href="/">Add the first photo</a>{% endif %}
+  </div>
 </main>
-<div id="viewer" class="viewer" aria-hidden="true">
-  <div class="vnav vprev" id="vprev" title="Previous"></div>
+<dialog id="viewer" class="viewer" aria-label="Photo viewer">
+  <button class="vnav vprev" id="vprev" type="button" aria-label="Previous photo">‹</button>
   <img id="vimg" alt="">
-  <div class="vnav vnext" id="vnext" title="Next"></div>
-  <button class="vclose" id="vclose" title="Close">×</button>
+  <button class="vnav vnext" id="vnext" type="button" aria-label="Next photo">›</button>
+  <button class="vclose" id="vclose" type="button" aria-label="Close photo viewer" autofocus>×</button>
   <div class="vhud"><div id="vcap"></div><div id="vcount"></div></div>
-</div>
+</dialog>
 <script src="{{ url_for('static', filename='wall.js') }}"></script>
-
 </body></html>
