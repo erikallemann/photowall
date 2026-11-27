@@ -503,6 +503,8 @@ def wall():
     html = render_template(
         "wall.html",
         show_download=(PHOTO_DIR.resolve() == UPLOAD_DIR.resolve()),
+        can_upload=_uploads_enabled(),
+        projector=request.args.get("display") == "1",
     )
     return Response(html, mimetype="text/html")
 

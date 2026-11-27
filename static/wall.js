@@ -1,225 +1,277 @@
-const P = new URLSearchParams(location.search);
-const grid   = document.getElementById('grid');
-const statusEl = document.getElementById('status');
-
+const params = new URLSearchParams(location.search);
+const projector = document.body.classList.contains('projector');
+const grid = document.getElementById('grid');
+const empty = document.getElementById('empty');
+const status = document.getElementById('status');
 const viewer = document.getElementById('viewer');
-const vimg   = document.getElementById('vimg');
-const vcap   = document.getElementById('vcap');
-const vcount = document.getElementById('vcount');
-const vclose = document.getElementById('vclose');
-const vprev  = document.getElementById('vprev');
-const vnext  = document.getElementById('vnext');
-
-const sortSel   = document.getElementById('sort');
-const orderSel  = document.getElementById('order');
-const layoutSel = document.getElementById('layout');
-const uniformCb = document.getElementById('uniform');
-const folderDetails = document.getElementById('folderDetails');
-const folderListEl  = document.getElementById('folderList');
-const folderSearch  = document.getElementById('folderSearch');
-const clearFoldersBtn = document.getElementById('clearFolders');
-const selCountEl = document.getElementById('selCount');
-const btnL = document.getElementById('scrollL');
-const btnR = document.getElementById('scrollR');
+const viewerImage = document.getElementById('vimg');
+const fullscreen = document.getElementById('fullscreen');
+const dateFormat = new Intl.DateTimeFormat(undefined, {
+  month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+});
 
 let items = [];
-let auto  = true;
-let timer = null;
-let cur   = -1;
-
-let sort   = P.get('sort')   || 'upload';
-let order  = P.get('order')  || 'desc';
-let layout = P.get('layout') || localStorage.getItem('pw_layout') || 'columns';
-let uniform = (P.get('tiles') || localStorage.getItem('pw_uniform') || '0') === '1';
+let cards = new Map();
+let lastList;
+let timer;
+let latestRequest = 0;
+let viewing = [];
+let currentPhoto = 0;
+let touchStart;
+let sort = params.get('sort') === 'taken' ? 'taken' : 'upload';
+let order = params.get('order') === 'asc' ? 'asc' : 'desc';
+let layout = params.get('layout') || localStorage.getItem('pw_layout') || 'columns';
+let uniform = (params.get('tiles') || localStorage.getItem('pw_uniform') || '0') === '1';
 let dirs = [];
-try {
-  const fromQs = (P.get('dirs')||'').split(',').map(s=>s.trim()).filter(Boolean);
-  const fromStore = JSON.parse(localStorage.getItem('pw_dirs')||'[]');
-  dirs = (fromQs.length ? fromQs : (Array.isArray(fromStore) ? fromStore : [])).filter(Boolean);
-} catch(e){ dirs = []; }
 
-sortSel.value = sort;
-orderSel.value = order;
-layoutSel.value = layout;
-uniformCb.checked = uniform;
-selCountEl.textContent = 'Selected: ' + dirs.length;
-
-function setStatus(t){ statusEl.textContent = t; }
-function qsUpdate(){
-  const u = new URL(location.href);
-  if (dirs.length) u.searchParams.set('dirs', dirs.join(',')); else u.searchParams.delete('dirs');
-  u.searchParams.delete('dir');
-  u.searchParams.set('sort',  sort);
-  u.searchParams.set('order', order);
-  u.searchParams.set('layout', layout);
-  u.searchParams.set('tiles',  uniform ? '1' : '0');
-  history.replaceState(null, '', u);
-}
-
-function applyLayout(){
-  grid.classList.remove('columns','rows');
-  grid.classList.add(layout);
-  document.body.classList.toggle('uniform', !!uniform);
-}
-
-sortSel.onchange   = ()=>{ sort  = sortSel.value;  qsUpdate(); load(); };
-orderSel.onchange  = ()=>{ order = orderSel.value; qsUpdate(); load(); };
-layoutSel.onchange = ()=>{ layout = layoutSel.value; localStorage.setItem('pw_layout', layout); applyLayout(); qsUpdate(); };
-uniformCb.onchange = ()=>{ uniform = uniformCb.checked; localStorage.setItem('pw_uniform', uniform ? '1':'0'); applyLayout(); qsUpdate(); };
-
-function setDirs(next){
-  dirs = (next||[]).map(s=>(s||'').trim().replace(/^\/+/, '').replace(/\\/g,'/').replace(/^\.\//,'').replace(/\/+$/,'')).filter(Boolean);
-  dirs = Array.from(new Set(dirs)).sort((a,b)=> a.localeCompare(b));
-  localStorage.setItem('pw_dirs', JSON.stringify(dirs));
-  selCountEl.textContent = 'Selected: ' + dirs.length;
-  qsUpdate();
-}
-
-clearFoldersBtn.onclick = ()=>{ setDirs([]); renderFolderList(); load(); };
-
-async function fetchDirs(){
-  try{
-    const r = await fetch('/dirs?limit=2000', {cache:'no-store'});
-    if(!r.ok) return [];
-    const d = await r.json();
-    return d.dirs || [];
-  }catch(e){ return []; }
-}
-
-let allDirs = [];
-function renderFolderList(){
-  const q = (folderSearch.value||'').trim().toLowerCase();
-  const vis = q ? allDirs.filter(d=> d.toLowerCase().includes(q)) : allDirs;
-  folderListEl.innerHTML = '';
-  const frag = document.createDocumentFragment();
-  for(const d of vis){
-    const row = document.createElement('label');
-    row.className = 'folderrow';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = dirs.includes(d);
-    cb.onchange = ()=>{
-      if(cb.checked) setDirs(dirs.concat([d]));
-      else setDirs(dirs.filter(x=>x!==d));
-      load();
-    };
-    const txt = document.createElement('span');
-    txt.textContent = d;
-    row.append(cb, txt);
-    frag.append(row);
+if (!projector) {
+  try {
+    const fromUrl = (params.get('dirs') || '').split(',').map(dir => dir.trim()).filter(Boolean);
+    const stored = JSON.parse(localStorage.getItem('pw_dirs') || '[]');
+    dirs = fromUrl.length ? fromUrl : (Array.isArray(stored) ? stored.filter(Boolean) : []);
+  } catch {
+    dirs = [];
   }
-  folderListEl.append(frag);
+}
+layout = layout === 'rows' ? 'rows' : 'columns';
+
+function updateUrl() {
+  const url = new URL(location.href);
+  if (dirs.length) url.searchParams.set('dirs', dirs.join(','));
+  else url.searchParams.delete('dirs');
+  url.searchParams.delete('dir');
+  url.searchParams.set('sort', sort);
+  url.searchParams.set('order', order);
+  url.searchParams.set('layout', layout);
+  url.searchParams.set('tiles', uniform ? '1' : '0');
+  history.replaceState(null, '', url);
 }
 
-folderSearch.oninput = ()=> renderFolderList();
+function applyLayout() {
+  grid.classList.toggle('columns', layout === 'columns');
+  grid.classList.toggle('rows', layout === 'rows');
+  document.body.classList.toggle('uniform', uniform);
+}
 
-(async function initFolders(){
-  allDirs = await fetchDirs();
-  renderFolderList();
-})();
+function startPolling() {
+  clearInterval(timer);
+  timer = setInterval(load, 15000);
+}
 
-async function fetchList(){
-  const dirsPart = dirs.length ? `&dirs=${encodeURIComponent(dirs.join(','))}` : '';
-  const r = await fetch(`/list?limit=400&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}${dirsPart}`, {cache:'no-store'});
-  if (r.status === 410) {
-    window.location.reload();
-    return [];
+function setupOptions() {
+  const sortInput = document.getElementById('sort');
+  const orderInput = document.getElementById('order');
+  const layoutInput = document.getElementById('layout');
+  const uniformInput = document.getElementById('uniform');
+  const toggle = document.getElementById('toggle');
+
+  sortInput.value = sort;
+  orderInput.value = order;
+  layoutInput.value = layout;
+  uniformInput.checked = uniform;
+  sortInput.onchange = () => { sort = sortInput.value; updateUrl(); load(); };
+  orderInput.onchange = () => { order = orderInput.value; updateUrl(); load(); };
+  layoutInput.onchange = () => {
+    layout = layoutInput.value;
+    localStorage.setItem('pw_layout', layout);
+    applyLayout();
+    updateUrl();
+  };
+  uniformInput.onchange = () => {
+    uniform = uniformInput.checked;
+    localStorage.setItem('pw_uniform', uniform ? '1' : '0');
+    applyLayout();
+    updateUrl();
+  };
+  document.getElementById('refresh').onclick = load;
+  toggle.onclick = () => {
+    const enabled = toggle.getAttribute('aria-pressed') !== 'true';
+    toggle.setAttribute('aria-pressed', String(enabled));
+    if (enabled) startPolling();
+    else clearInterval(timer);
+  };
+  applyLayout();
+  setupFolders();
+}
+
+async function setupFolders() {
+  const list = document.getElementById('folderList');
+  const search = document.getElementById('folderSearch');
+  const selected = document.getElementById('selCount');
+  let folders = [];
+
+  function setFolders(next) {
+    dirs = [...new Set(next)].sort((a, b) => a.localeCompare(b));
+    localStorage.setItem('pw_dirs', JSON.stringify(dirs));
+    updateUrl();
+    load();
   }
-  const d = await r.json();
-  return d.items || [];
+
+  function renderFolders() {
+    selected.textContent = 'Selected: ' + dirs.length;
+    const query = search.value.trim().toLowerCase();
+    list.replaceChildren(...folders.filter(dir => dir.toLowerCase().includes(query)).map(dir => {
+      const row = document.createElement('label');
+      row.className = 'folderrow';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = dirs.includes(dir);
+      checkbox.onchange = () => {
+        setFolders(checkbox.checked ? [...dirs, dir] : dirs.filter(value => value !== dir));
+        selected.textContent = 'Selected: ' + dirs.length;
+      };
+      row.append(checkbox, dir);
+      return row;
+    }));
+  }
+
+  document.getElementById('clearFolders').onclick = () => { setFolders([]); renderFolders(); };
+  search.oninput = renderFolders;
+  try {
+    const response = await fetch('/dirs?limit=2000', { cache: 'no-store' });
+    if (response.ok) folders = (await response.json()).dirs || [];
+  } catch {
+    // The gallery can still load when folder browsing is unavailable.
+  }
+  renderFolders();
 }
 
-function render(){
-  grid.innerHTML = '';
-  const labelMap = {upload:'Uploaded', taken:'Taken'};
-  const label = labelMap[sort] || 'Time';
+function dateFor(photo) {
+  return new Date(sort === 'taken' ? (photo.tk || photo.ts) : photo.ts);
+}
 
-  items.forEach((it,i)=>{
-    const card = document.createElement('article'); card.className = 'card';
-    const img  = document.createElement('img'); img.loading='lazy'; img.decoding='async'; img.alt=it.name; img.src=it.url+'?v='+it.ts;
-    const meta = document.createElement('div'); meta.className='meta';
-    const ts   = new Date((sort==='taken' ? (it.tk||it.ts) : it.ts)).toLocaleString();
-    const stamp = document.createElement('div'); stamp.className='pill'; stamp.textContent = `${label}: ` + ts;
-    const cap  = document.createElement('div'); cap.className='muted'; cap.textContent = it.cap || '';
-    meta.append(stamp,cap); card.append(img,meta);
-    img.addEventListener('click',()=> openViewer(i));
-    grid.append(card);
+function createCard(photo, date) {
+  const card = document.createElement('article');
+  card.className = 'card';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'photo-button';
+  const image = document.createElement('img');
+  image.loading = projector ? 'eager' : 'lazy';
+  image.decoding = 'async';
+  image.alt = '';
+  image.src = photo.url + '?v=' + photo.ts;
+  button.append(image);
+  card.append(button);
+
+  if (!projector) {
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    if (photo.cap) {
+      const caption = document.createElement('p');
+      caption.textContent = photo.cap;
+      meta.append(caption);
+    }
+    const stamp = document.createElement('time');
+    stamp.dateTime = date.toISOString();
+    stamp.textContent = dateFormat.format(date);
+    meta.append(stamp);
+    card.append(meta);
+  }
+  return card;
+}
+
+function render() {
+  const nextCards = new Map();
+  let position = grid.firstElementChild;
+  items.forEach((photo, index) => {
+    const date = dateFor(photo);
+    const key = JSON.stringify([photo.url, photo.ts, photo.cap, date.getTime()]);
+    const card = cards.get(key) || createCard(photo, date);
+    const button = card.firstElementChild;
+    button.dataset.index = index;
+    button.setAttribute('aria-label', photo.cap ? 'Open photo: ' + photo.cap : 'Open photo ' + (index + 1));
+    if (card === position) position = position.nextElementSibling;
+    else grid.insertBefore(card, position);
+    nextCards.set(key, card);
   });
-  setStatus(`Showing ${items.length} photo(s)`);
-}
-
-async function load(){ try { items = await fetchList(); render(); } catch(e){ setStatus('Failed to load photos'); } }
-
-document.getElementById('refresh').onclick = load;
-document.getElementById('toggle').onclick  = ()=>{
-  auto = !auto;
-  document.getElementById('toggle').textContent = 'Auto: ' + (auto ? 'On' : 'Off');
-  if (auto) tick(); else clearInterval(timer);
-};
-function tick(){ clearInterval(timer); timer = setInterval(load, 15000); }
-
-applyLayout();
-load(); tick();
-
-btnL.addEventListener('click', ()=>{ window.scrollBy({top:-window.innerHeight*0.8, behavior:'smooth'}); });
-btnR.addEventListener('click', ()=>{ window.scrollBy({top: window.innerHeight*0.8, behavior:'smooth'}); });
-
-// Viewer
-let lockScrollY = 0;
-function openViewer(i){
-  if (!items.length) return;
-  cur = i; updateViewer();
-  viewer.classList.add('show');
-  lockScrollY = window.scrollY || document.documentElement.scrollTop || 0;
-  document.body.style.position='fixed';
-  document.body.style.top = `-${lockScrollY}px`;
-  document.body.style.left = '0'; document.body.style.right='0';
-  viewer.setAttribute('aria-hidden','false');
-}
-function closeViewer(){
-  viewer.classList.remove('show');
-  document.body.style.position=''; document.body.style.top='';
-  document.body.style.left=''; document.body.style.right='';
-  window.scrollTo(0, lockScrollY);
-  viewer.setAttribute('aria-hidden','true');
-}
-function next(){ if (!items.length) return; cur=(cur+1)%items.length; updateViewer(); }
-function prev(){ if (!items.length) return; cur=(cur-1+items.length)%items.length; updateViewer(); }
-function updateViewer(){
-  const it = items[cur];
-  vimg.src = it.url+'?v='+it.ts;
-  const tval = (sort==='taken' ? (it.tk||it.ts) : it.ts);
-  vcap.textContent = new Date(tval).toLocaleString() + (it.cap? (' · '+it.cap):'');
-  vcount.textContent = (cur+1)+'/'+items.length;
-  vimg.alt = it.name;
-}
-vclose.addEventListener('click', closeViewer);
-vnext.addEventListener('click', next);
-vprev.addEventListener('click', prev);
-viewer.addEventListener('click', (e)=>{ if(e.target===viewer) closeViewer(); });
-window.addEventListener('keydown', (e)=>{
-  if (viewer.classList.contains('show')){
-    if (e.key==='Escape') closeViewer();
-    else if (e.key==='ArrowRight') next();
-    else if (e.key==='ArrowLeft')  prev();
+  for (const [key, card] of cards) {
+    if (!nextCards.has(key)) card.remove();
   }
+  cards = nextCards;
+}
+
+async function load() {
+  const request = ++latestRequest;
+  const query = new URLSearchParams({
+    limit: projector ? '12' : '400',
+    sort: projector ? 'upload' : sort,
+    order: projector ? 'desc' : order,
+  });
+  if (dirs.length) query.set('dirs', dirs.join(','));
+  try {
+    const response = await fetch('/list?' + query, { cache: 'no-store' });
+    if (response.status === 410) {
+      window.location.reload();
+      return;
+    }
+    if (!response.ok) throw new Error('Photo list unavailable');
+    const incoming = (await response.json()).items || [];
+    if (request !== latestRequest) return;
+    const listKey = JSON.stringify([sort, incoming]);
+    if (listKey !== lastList) {
+      items = incoming;
+      render();
+      lastList = listKey;
+    }
+    const count = items.length;
+    const label = (projector && count === 12 ? 'Latest ' : '') + count + (count === 1 ? ' photo' : ' photos');
+    if (status.textContent !== label) status.textContent = label;
+    empty.hidden = count > 0;
+  } catch {
+    if (request === latestRequest) status.textContent = 'Could not load photos.';
+  }
+}
+
+function showPhoto(index) {
+  currentPhoto = (index + viewing.length) % viewing.length;
+  const photo = viewing[currentPhoto];
+  viewerImage.src = photo.url + '?v=' + photo.ts;
+  viewerImage.alt = photo.cap || 'Photo ' + (currentPhoto + 1);
+  document.getElementById('vcap').textContent = [photo.cap, dateFormat.format(dateFor(photo))].filter(Boolean).join(' · ');
+  document.getElementById('vcount').textContent = (currentPhoto + 1) + ' / ' + viewing.length;
+}
+
+grid.addEventListener('click', event => {
+  const button = event.target.closest('.photo-button');
+  if (!button) return;
+  viewing = items;
+  showPhoto(Number(button.dataset.index));
+  viewer.showModal();
 });
-// Touch gestures
-let startX=0,startY=0,dx=0,dy=0, tracking=false;
-const SWIPE_X=50, SWIPE_Y=80;
-viewer.addEventListener('touchstart', (e)=>{
-  if(!viewer.classList.contains('show')) return;
-  if(e.touches.length!==1) return;
-  tracking=true; startX=e.touches[0].clientX; startY=e.touches[0].clientY;
-}, {passive:true});
-viewer.addEventListener('touchmove', (e)=>{
-  if(!tracking) return;
-  const t=e.touches[0]; dx=t.clientX-startX; dy=t.clientY-startY;
-  if(Math.abs(dx) > Math.abs(dy)) e.preventDefault();
-}, {passive:false});
-viewer.addEventListener('touchend', ()=>{
-  if(!tracking) return;
-  if(Math.abs(dx) >= SWIPE_X && Math.abs(dx) > Math.abs(dy)){ if(dx < 0) next(); else prev(); }
-  else if(dy > SWIPE_Y){ closeViewer(); }
-  tracking=false; dx=0; dy=0;
-}, {passive:true});
+document.getElementById('vclose').onclick = () => viewer.close();
+document.getElementById('vprev').onclick = () => showPhoto(currentPhoto - 1);
+document.getElementById('vnext').onclick = () => showPhoto(currentPhoto + 1);
+viewer.addEventListener('click', event => { if (event.target === viewer) viewer.close(); });
+viewer.addEventListener('keydown', event => {
+  if (event.key === 'ArrowLeft') showPhoto(currentPhoto - 1);
+  if (event.key === 'ArrowRight') showPhoto(currentPhoto + 1);
+});
+viewer.addEventListener('touchstart', event => {
+  touchStart = event.touches.length === 1 ? event.touches[0] : null;
+}, { passive: true });
+viewer.addEventListener('touchend', event => {
+  if (!touchStart) return;
+  const touch = event.changedTouches[0];
+  const dx = touch.clientX - touchStart.clientX;
+  const dy = touch.clientY - touchStart.clientY;
+  if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy)) showPhoto(currentPhoto + (dx < 0 ? 1 : -1));
+  else if (dy > 80) viewer.close();
+  touchStart = null;
+}, { passive: true });
+
+if (projector) {
+  fullscreen.hidden = !document.fullscreenEnabled;
+  function toggleFullscreen() {
+    const request = document.fullscreenElement ? document.exitFullscreen() : document.body.requestFullscreen();
+    request.catch(() => {});
+  }
+  fullscreen.onclick = toggleFullscreen;
+  document.addEventListener('keydown', event => {
+    if (event.key.toLowerCase() === 'f' && !viewer.open && document.fullscreenEnabled) toggleFullscreen();
+  });
+} else {
+  setupOptions();
+}
+load();
+startPolling();
