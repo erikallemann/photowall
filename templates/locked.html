@@ -1,18 +1,19 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Photowall Locked</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='locked.css') }}"></head>
 <body>
 <main>
-  <h1>Photowall</h1>
+  <div class="wordmark">Photowall</div>
+  <h1>Enter the view PIN</h1>
   <div class="card">
     <p class="muted"><strong>The wall is locked.</strong> Enter the PIN to view the gallery and slideshow.</p>
-    <form method="post" action="/enter" autocomplete="off">
-      <input name="pin" type="password" placeholder="View PIN" maxlength="128" required>
-      <button type="submit">Enter</button>
+    {% set destination = request.full_path if request.query_string else request.path %}
+    <form method="post" action="{{ url_for('enter_pin', next=destination) if request.path in ('/wall', '/slideshow') else url_for('enter_pin') }}" autocomplete="off">
+      <input name="pin" type="password" placeholder="View PIN" aria-label="View PIN" maxlength="128" required>
+      <button class="primary" type="submit">Enter</button>
     </form>
-    <div class="hint muted">Tip: You can also pass the PIN via header <span class="pill">X-View-Pin</span> to programmatic calls.</div>
-    <div class="nav"><a class="muted" href="/">Home</a><a class="muted" href="/wall">Wall</a><a class="muted" href="/slideshow">Slideshow</a></div>
   </div>
 </main>
 </body></html>

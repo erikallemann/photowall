@@ -1,6 +1,7 @@
 import errno
 import io
 import os
+import re
 import shutil
 import socket
 import struct
@@ -61,6 +62,26 @@ def test_home_wall_and_slideshow_render(client):
     assert client.get("/").status_code == 200
     assert client.get("/wall").status_code == 200
     assert client.get("/slideshow").status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("path", "display_markup"),
+    [
+        ("/wall?display=1", 'class="projector"'),
+        ("/slideshow?interval=8", 'id="slide"'),
+    ],
+)
+def test_view_pin_preserves_requested_display(client, monkeypatch, path, display_markup):
+    monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
+    locked = client.get(path).get_data(as_text=True)
+    assert display_markup not in locked
+    form = re.search(r'<form\b[^>]*\baction="([^"]+)"', locked)
+    assert form
+
+    signed_in = client.post(form.group(1), data={"pin": "viewer"}, follow_redirects=True)
+    assert signed_in.status_code == 200
+    assert signed_in.request.full_path == path
+    assert display_markup in signed_in.get_data(as_text=True)
 
 
 def test_readiness_probes_event_storage(client, monkeypatch, tmp_path):
