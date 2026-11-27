@@ -1,15 +1,46 @@
-  body{margin:0;background:#0b0c10;color:#f5f7fb;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-  main{max-width:720px;margin:32px auto;padding:0 16px}
-  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px}
-  h1{margin:0}
-  a{color:#8ab4ff}
-  form{background:#0f1219;border:1px solid #27304a;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:16px}
-  label{display:flex;flex-direction:column;gap:6px;color:#c7d0e8;font-size:14px}
-  input[type=file]{color:#f5f7fb}
-  input,textarea,button{background:#161922;border:1px solid #242837;color:#f5f7fb;padding:10px 12px;border-radius:12px;font:inherit}
-  button{cursor:pointer;align-self:flex-start}
-  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
-  .muted{color:#9aa3b2;font-size:14px}
-  #status{margin-top:8px;font-size:14px;min-height:18px}
-  #status.error{color:#ff8a80}
-  #status.ok{color:#8ab4ff}
+main { width: min(100%, 39rem); margin-inline: auto; padding: 0 1rem 2rem; }
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .55rem;
+  min-height: 4.2rem;
+  border-bottom: 1px solid var(--line);
+}
+h1 {
+  margin: 1.6rem 0 1.1rem;
+  font: 500 clamp(2.5rem, 8vw, 4rem)/1 var(--display-font);
+  letter-spacing: -.055em;
+}
+.actions { display: flex; gap: .85rem; font-size: .875rem; }
+.actions a { display: inline-flex; align-items: center; min-height: 44px; }
+form {
+  display: grid;
+  gap: 1.05rem;
+  padding: clamp(1rem, 4vw, 1.65rem);
+  border: 1px solid var(--line);
+  border-radius: 1.1rem;
+  background: var(--surface);
+  box-shadow: 0 14px 32px #25332c0b;
+}
+label { display: grid; gap: .38rem; font-size: .91rem; font-weight: 620; }
+label .muted { font-size: .78rem; font-weight: 400; }
+input:not([type="checkbox"]) { min-width: 0; width: 100%; font-size: 1rem; font-weight: 400; }
+input[type="file"] { padding: .42rem; border-style: dashed; }
+input::file-selector-button {
+  min-height: 37px;
+  margin-right: .55rem;
+  padding: .25rem .65rem;
+  border: 0;
+  border-radius: .45rem;
+  background: #e2ebe3;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+}
+#status { font-size: .85rem; }
+#status:empty { display: none; }
+#status.error { color: #9d3028; }
+#status.ok { color: var(--accent); }
+.archive { display: inline-block; margin-top: 1rem; font-size: .85rem; }
