@@ -1,21 +1,19 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Upload Photos</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='upload_disabled.css') }}"></head>
 <body>
 <main>
-  <header>
-    <h1>Photowall</h1>
-    <nav><a href="/wall">Wall</a></nav>
-  </header>
+  <div class="wordmark">Photowall</div>
+  <h1>Uploads are closed</h1>
   <div class="note">
-    <strong>Uploads are closed.</strong>
-    <p>You can still view the wall and download all photos as a ZIP archive.</p>
-    <p class="muted">{{ source_note|safe }}</p>
+    <p class="muted">{{ source_note }}</p>
     <div class="actions">
-      <a class="btn" href="/wall">Open the photo wall</a>
-      <a class="btn" href="/slideshow">Start slideshow</a>
-      {% if show_download %}<a class="btn" href="/download">Download ZIP</a>{% endif %}
+      <a class="button primary" href="/wall">Open the photo wall</a>
+      <a class="button" href="/slideshow">Slideshow</a>
+      <a class="button" href="/wall?display=1">Big screen wall</a>
+      {% if show_download %}<a class="button" href="/download">Download ZIP</a>{% endif %}
     </div>
   </div>
 </main>

@@ -2,16 +2,38 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Slideshow</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='slideshow.css') }}">
 </head>
 <body>
-<div id="wrap">
-  <img id="slide" alt="">
-  <div id="hint" class="hidden">Space: play/pause. Arrow keys navigate. F fullscreen. R reload. S shuffle. +/- speed.</div>
-  <div id="hud">
-    <div><strong>Photowall</strong> <span id="time" class="muted"></span></div>
-    <div class="muted"><span id="count">0/0</span> • <span id="speed"></span>s</div>
-  </div>
-</div>
+<main id="wrap">
+  <img id="slide" alt="" hidden>
+  <p id="empty">Waiting for photos…</p>
+  <header class="screen-header overlay">
+    <h1>Slideshow</h1>
+    <nav aria-label="Display">
+      <a class="button" href="/wall">Guest wall</a>
+      <a class="button" href="/wall?display=1">Big screen wall</a>
+    </nav>
+  </header>
+  <footer class="screen-footer overlay">
+    <div id="hud">
+      <span id="caption"></span>
+      <span id="time"></span>
+      <span id="count">0 / 0</span>
+      <span><span id="speed"></span>s per photo</span>
+    </div>
+    <div class="controls" aria-label="Slideshow controls">
+      <button id="previous" type="button" aria-label="Previous photo">‹</button>
+      <button id="pause" class="primary" type="button">Pause</button>
+      <button id="next" type="button" aria-label="Next photo">›</button>
+      <button id="fullscreen" type="button">Full screen</button>
+    </div>
+    <details id="hint">
+      <summary>Keyboard shortcuts</summary>
+      <p>Space to play or pause. Arrow keys to navigate. F for full screen. R to refresh. S to shuffle. + and − for speed.</p>
+    </details>
+  </footer>
+</main>
 <script src="{{ url_for('static', filename='slideshow.js') }}"></script>
 </body></html>

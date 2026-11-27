@@ -1,79 +1,145 @@
-const P = new URLSearchParams(location.search);
-let interval = Math.max(1, Number(P.get('interval')||6));
-let shuffle  = (P.get('shuffle')==='1');
-let showHint = (P.get('hint')!=='0');
-let sort = (P.get('sort')==='taken') ? 'taken' : 'upload';
-let order = (P.get('order')==='asc') ? 'asc' : 'desc';
-let dir = (P.get('dir')||'').replace(/^\/+/, '').replace(/\\/g,'/').trim();
-let dirs = (P.get('dirs')||'').split(',').map(s=>s.trim()).filter(Boolean);
+const params = new URLSearchParams(location.search);
+const wrap = document.getElementById('wrap');
+const image = document.getElementById('slide');
+const pause = document.getElementById('pause');
+const fullscreen = document.getElementById('fullscreen');
+const empty = document.getElementById('empty');
+const sort = params.get('sort') === 'taken' ? 'taken' : 'upload';
+const order = params.get('order') === 'asc' ? 'asc' : 'desc';
+const dir = (params.get('dir') || '').replace(/^\/+/, '').replace(/\\/g, '/').trim();
+const dirs = (params.get('dirs') || '').split(',').map(value => value.trim()).filter(Boolean);
 
-let paused=false, idx=-1, items=[], timer=null, hideMouseTimer=null, loading=false;
+let interval = Math.max(1, Number(params.get('interval')) || 6);
+let shuffle = params.get('shuffle') === '1';
+let paused = false;
+let index = 0;
+let items = [];
+let timer;
+let idleTimer;
+let loading = false;
 
-const els = { img: document.getElementById('slide'), time: document.getElementById('time'), count: document.getElementById('count'), speed: document.getElementById('speed'), hint: document.getElementById('hint') };
-function setSpeed(){ els.speed.textContent = interval.toFixed(0); }
-setSpeed(); if (showHint) els.hint.classList.remove('hidden');
+function render() {
+  const photo = items[index];
+  image.hidden = !photo;
+  empty.hidden = Boolean(photo);
+  if (photo) {
+    const source = photo.url + '?v=' + photo.ts;
+    if (image.getAttribute('src') !== source) image.src = source;
+    image.alt = photo.cap || 'Photo ' + (index + 1);
+  } else {
+    image.removeAttribute('src');
+  }
+  document.getElementById('caption').textContent = photo?.cap || '';
+  document.getElementById('time').textContent = photo
+    ? new Date(sort === 'taken' ? (photo.tk || photo.ts) : photo.ts).toLocaleString() : '';
+  document.getElementById('count').textContent = (photo ? index + 1 : 0) + ' / ' + items.length;
+  document.getElementById('speed').textContent = interval.toFixed(0);
+}
 
-function renderHUD(){
-  els.count.textContent = (items.length? (idx+1):0) + '/' + items.length;
-  if (idx>=0 && items[idx]){
-    const it = items[idx];
-    const tval = sort==='taken' ? (it.tk||it.ts) : it.ts;
-    els.time.textContent = new Date(tval).toLocaleString();
+function show(position) {
+  if (!items.length) return;
+  index = (position + items.length) % items.length;
+  render();
+}
+function next() { show(index + 1); }
+function prev() { show(index - 1); }
+
+function randomOrder(photos) {
+  return photos.map(photo => [Math.random(), photo])
+    .sort((a, b) => a[0] - b[0]).map(([, photo]) => photo);
+}
+
+async function refreshList() {
+  if (loading) return;
+  loading = true;
+  const query = new URLSearchParams({ limit: '400', sort, order });
+  if (dirs.length) query.set('dirs', dirs.join(','));
+  else if (dir) query.set('dir', dir);
+  try {
+    const response = await fetch('/list?' + query, { cache: 'no-store' });
+    if (response.status === 410) {
+      location.reload();
+      return;
+    }
+    if (!response.ok) throw new Error('Photo list unavailable');
+    const incoming = (await response.json()).items || [];
+    const current = items[index]?.name;
+    const previousNames = new Set(items.map(photo => photo.name));
+    const added = incoming.filter(photo => !previousNames.has(photo.name));
+    if (shuffle) {
+      const incomingByName = new Map(incoming.map(photo => [photo.name, photo]));
+      items = items.filter(photo => incomingByName.has(photo.name)).map(photo => incomingByName.get(photo.name));
+      const currentIndex = items.findIndex(photo => photo.name === current);
+      items.splice(currentIndex + 1, 0, ...randomOrder(added));
+    } else {
+      items = incoming;
+    }
+    const savedIndex = items.findIndex(photo => photo.name === current);
+    index = !shuffle && added.length ? 0 : Math.max(0, savedIndex);
+    empty.textContent = 'Waiting for photos…';
+    render();
+  } catch {
+    if (!items.length) empty.textContent = 'Could not load photos. Trying again soon.';
+  } finally {
+    loading = false;
   }
 }
 
-function show(i){
-  if (!items.length) return;
-  i = (i + items.length) % items.length;
-  idx = i;
-  const it = items[idx];
-  els.img.src = it.url + '?v=' + it.ts;
-  renderHUD();
+function schedule() {
+  clearTimeout(timer);
+  if (!paused) timer = setTimeout(() => { next(); schedule(); }, interval * 1000);
 }
 
-function next(){ if (!items.length) return; show(idx+1); }
-function prev(){ if (!items.length) return; show(idx-1); }
-
-async function refreshList(){
-  if (loading) return; loading = true;
-  try{
-    const dirsPart = dirs.length ? `&dirs=${encodeURIComponent(dirs.join(','))}` : (dir ? `&dir=${encodeURIComponent(dir)}` : '');
-    const r = await fetch(`/list?limit=400&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}${dirsPart}`, {cache:'no-store'});
-    if (r.status === 410) {
-      window.location.reload();
-      return;
-    }
-    const d = await r.json();
-    const incoming = d.items||[];
-    if (!items.length){ items = incoming.slice(); if (shuffle) items.sort(()=>Math.random()-0.5); idx = 0; show(idx); return; }
-    const have = new Set(items.map(it=>it.name));
-    const newly = incoming.filter(it=>!have.has(it.name));
-    if (newly.length){
-      if (!shuffle){ items = incoming.slice(); show(0); }
-      else { const insertAt = Math.min(items.length, Math.max(0, idx+1)); items.splice(insertAt, 0, ...newly.sort(()=>Math.random()-0.5)); }
-    } else { renderHUD(); }
-  }catch(e){ }
-  finally{ loading = false; }
+function togglePause() {
+  paused = !paused;
+  pause.textContent = paused ? 'Play' : 'Pause';
+  schedule();
+}
+function step(callback) {
+  callback();
+  schedule();
+}
+function toggleFullscreen() {
+  if (!document.fullscreenEnabled) return;
+  const request = document.fullscreenElement ? document.exitFullscreen() : wrap.requestFullscreen();
+  request.catch(() => {});
+}
+function showControls() {
+  wrap.classList.remove('idle');
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => wrap.classList.add('idle'), 2500);
 }
 
-function schedule(){ clearTimeout(timer); if (!paused) timer = setTimeout(()=>{ next(); schedule(); }, interval*1000); }
-
-window.addEventListener('keydown', (e)=>{
-  if (e.key===' '){ e.preventDefault(); paused=!paused; schedule(); }
-  else if (e.key==='ArrowRight'){ next(); }
-  else if (e.key==='ArrowLeft'){ prev(); }
-  else if (e.key==='f' || e.key==='F'){ if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{}); else document.exitFullscreen().catch(()=>{}); }
-  else if (e.key==='r' || e.key==='R'){ refreshList().then(()=>renderHUD()); }
-  else if (e.key==='s' || e.key==='S'){ shuffle=!shuffle; }
-  else if (e.key==='+' || e.key==='=' || e.key==='ArrowUp'){ interval=Math.min(60, interval+1); setSpeed(); schedule(); }
-  else if (e.key==='-' || e.key==='_' || e.key==='ArrowDown'){ interval=Math.max(1, interval-1); setSpeed(); schedule(); }
+document.getElementById('previous').onclick = () => step(prev);
+document.getElementById('next').onclick = () => step(next);
+document.getElementById('hint').hidden = params.get('hint') === '0';
+pause.onclick = togglePause;
+fullscreen.hidden = !document.fullscreenEnabled;
+fullscreen.onclick = toggleFullscreen;
+document.addEventListener('fullscreenchange', () => {
+  fullscreen.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+  showControls();
 });
-
-function resetMouseHide(){ clearTimeout(hideMouseTimer); document.body.style.cursor='default'; hideMouseTimer = setTimeout(()=>{ document.body.style.cursor='none'; }, 1500); }
-['mousemove','mousedown','keydown','touchstart'].forEach(ev=>document.addEventListener(ev, resetMouseHide));
-resetMouseHide();
-
-setInterval(()=> refreshList(), 10000);
-document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) refreshList(); });
-
-(async function init(){ await refreshList(); schedule(); })();
+['pointermove', 'pointerdown', 'keydown'].forEach(action => document.addEventListener(action, showControls));
+window.addEventListener('keydown', event => {
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+  const key = event.key.toLowerCase();
+  if (key === ' ' && !event.target.closest?.('button, a, summary')) {
+    event.preventDefault();
+    togglePause();
+  } else if (key === 'arrowright') step(next);
+  else if (key === 'arrowleft') step(prev);
+  else if (key === 'f') toggleFullscreen();
+  else if (key === 'r') refreshList();
+  else if (key === 's') shuffle = !shuffle;
+  else if (['+', '=', 'arrowup', '-', '_', 'arrowdown'].includes(key)) {
+    const delta = ['+', '=', 'arrowup'].includes(key) ? 1 : -1;
+    interval = Math.max(1, Math.min(60, interval + delta));
+    render();
+    schedule();
+  }
+});
+render();
+refreshList().then(schedule);
+setInterval(refreshList, 10000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshList(); });
