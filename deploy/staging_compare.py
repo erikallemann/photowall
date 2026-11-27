@@ -52,6 +52,14 @@ def cleanup(run):
 
 
 @dataclass(frozen=True)
+class RequestResult:
+    status: int
+    body: bytes
+    seconds: float
+    first_byte_seconds: float | None = None
+
+
+@dataclass(frozen=True)
 class Endpoint:
     origin: str
     pins: dict[str, str]
@@ -71,19 +79,22 @@ class Endpoint:
             connection.request(method, path, body=body, headers=headers)
             response = connection.getresponse()
             if output is not None and response.status == 200:
+                first_byte = response.read(1)
+                if not first_byte:
+                    raise ValueError(f"Empty download from {path}")
+                first_byte_seconds = time.monotonic() - started
+                output.write(first_byte)
                 shutil.copyfileobj(response, output, length=1024 * 1024)
-                data = b""
-            else:
-                data = response.read()
-            return response.status, data, time.monotonic() - started
+                return RequestResult(response.status, b"", time.monotonic() - started, first_byte_seconds)
+            data = response.read()
+            return RequestResult(response.status, data, time.monotonic() - started)
         finally:
             connection.close()
 
 
 def expect(code, result):
-    status, body, seconds = result
-    assert status == code, (status, code, body[:200])
-    return body, seconds
+    assert result.status == code, (result.status, code, result.body[:200])
+    return result.body, result.seconds
 
 
 def event_env(event, data_dir, quota):
@@ -149,7 +160,7 @@ def await_events(endpoints):
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         try:
-            if all(endpoints[event].request("GET", "/readyz")[0] == 204 for event in EVENTS):
+            if all(endpoints[event].request("GET", "/readyz").status == 204 for event in EVENTS):
                 return
         except (ConnectionError, TimeoutError):
             pass
@@ -214,10 +225,12 @@ def p50_p95(samples):
     return {f"p{p}": round(ordered[max(0, math.ceil(len(ordered) * p / 100) - 1)], 3) for p in (50, 95)}
 
 
-def run_workload(endpoints, count, quota=False):
-    for event in EVENTS:
+def run_workload(endpoints, count, quota=False, guest_clients=25):
+    events = tuple(endpoints)
+    guest_clients = min(guest_clients, count)
+    for event in events:
         assert not list_items(endpoints[event])[0], f"{event} gallery must start empty"
-    photos = {event: gallery(i, count, quota) for i, event in enumerate(EVENTS)}
+    photos = {event: gallery(i, count, quota) for i, event in enumerate(events)}
     stop = Event()
 
     def poll(event, limit):
@@ -233,15 +246,15 @@ def run_workload(endpoints, count, quota=False):
         return [
             (expect(201, upload(endpoints[event], event, index, photos[event][index]))[1],
              time.monotonic())
-            for index in range(guest_index, count, 25)
+            for index in range(guest_index, count, guest_clients)
         ]
 
-    with ThreadPoolExecutor(max_workers=54) as pool:
-        polls = [pool.submit(poll, event, limit) for event in EVENTS for limit in (200, 400)]
-        guests = [pool.submit(guest, event, i) for event in EVENTS for i in range(25)]
+    with ThreadPoolExecutor(max_workers=len(events) * (guest_clients + 2)) as pool:
+        polls = [pool.submit(poll, event, limit) for event in events for limit in (200, 400)]
+        guests = [pool.submit(guest, event, i) for event in events for i in range(guest_clients)]
         try:
             observations = [pair for result in guests for pair in result.result()]
-            lists = {event: list_items(endpoints[event])[0] for event in EVENTS}
+            lists = {event: list_items(endpoints[event])[0] for event in events}
             observed_after_s = time.monotonic() - max(ack for _, ack in observations)
             for event, items in lists.items():
                 assert len(items) == count, (event, len(items), count)
@@ -249,24 +262,30 @@ def run_workload(endpoints, count, quota=False):
                     f"{i:03d}.png" for i in range(count)
                 }
             zips = {}
-            for event, other in (EVENTS, EVENTS[::-1]):
+            for event in events:
                 endpoint = endpoints[event]
-                wrong_pins = endpoints[other].pins
                 mine = next(item for item in lists[event] if item["name"].endswith("-000.png"))
-                theirs = lists[other][0]
-                expect(403, endpoint.request("GET", "/list", role="View", credential=wrong_pins["View"]))
-                expect(403, upload(endpoint, event, count, photo(0, (2, 2)), wrong_pins["Upload"]))
-                expect(403, delete(endpoint, mine["name"], wrong_pins["Admin"]))
-                path = f'/uploads/{quote(theirs["name"])}'
-                expect(403, endpoint.request("GET", path, role="View", credential=wrong_pins["View"]))
-                expect(404, endpoint.request("GET", path, role="View"))
-                expect(404, delete(endpoint, theirs["name"]))
-                expect(403, endpoint.request("GET", "/download", role="View", credential=wrong_pins["View"]))
+                for other in endpoints.keys() - {event}:
+                    wrong_pins = endpoints[other].pins
+                    theirs = lists[other][0]
+                    expect(403, endpoint.request("GET", "/list", role="View", credential=wrong_pins["View"]))
+                    expect(403, upload(endpoint, event, count, photo(0, (2, 2)), wrong_pins["Upload"]))
+                    expect(403, delete(endpoint, mine["name"], wrong_pins["Admin"]))
+                    path = f'/uploads/{quote(theirs["name"])}'
+                    expect(403, endpoint.request("GET", path, role="View", credential=wrong_pins["View"]))
+                    expect(404, endpoint.request("GET", path, role="View"))
+                    expect(404, delete(endpoint, theirs["name"]))
+                    expect(403, endpoint.request("GET", "/download", role="View", credential=wrong_pins["View"]))
                 image, _ = expect(200, endpoint.request("GET", mine["url"], role="View"))
                 assert image == photos[event][0]
                 with tempfile.TemporaryFile() as archive:
-                    _, seconds = expect(200, endpoint.request("GET", "/download", role="View", output=archive))
-                    zips[event] = {"seconds": round(seconds, 3), "bytes": archive.tell()}
+                    response = endpoint.request("GET", "/download", role="View", output=archive)
+                    expect(200, response)
+                    zips[event] = {
+                        "first_byte_seconds": round(response.first_byte_seconds, 3),
+                        "seconds": round(response.seconds, 3),
+                        "bytes": archive.tell(),
+                    }
                     with ZipFile(archive) as zipped:
                         assert set(zipped.namelist()) == {"index.html", *(item["name"] for item in lists[event])}
                         for info in zipped.infolist():
@@ -278,7 +297,8 @@ def run_workload(endpoints, count, quota=False):
         poll_samples = [seconds for task in polls for seconds in task.result()]
     return {
         "photos_per_event": count,
-        "original_bytes_per_event": {event: sum(map(len, photos[event])) for event in EVENTS},
+        "upload_clients_per_event": guest_clients,
+        "original_bytes_per_event": {event: sum(map(len, fixture)) for event, fixture in photos.items()},
         "uploads_seconds": p50_p95([seconds for seconds, _ in observations]),
         "polls_seconds": p50_p95(poll_samples),
         "poll_requests": len(poll_samples),
@@ -287,7 +307,7 @@ def run_workload(endpoints, count, quota=False):
     }
 
 
-def compare(image, count, cycles, shared, quota):
+def compare(image, count, cycles, shared, quota, guest_clients=25):
     run = f"pw-mvp03-{uuid4().hex[:8]}"
     label = f"{LABEL}={run}"
     gateway = f"{run}-gateway"
@@ -325,7 +345,7 @@ def compare(image, count, cycles, shared, quota):
                     docker("rm", "-f", *containers)
             expect(404, Endpoint(loopback, {}, "unknown.wall.test").request("GET", "/list"))
             assert all(docker("port", name) == "" for name in containers)
-            metrics = run_workload(endpoints, count, quota)
+            metrics = run_workload(endpoints, count, quota, guest_clients)
             for name in containers:
                 leftovers = docker(
                     "exec", name, "find", "/data", "(", "-name", "photowall_zip_*", "-o",
@@ -345,7 +365,7 @@ def compare(image, count, cycles, shared, quota):
                 int(docker("exec", name, "cat", "/sys/fs/cgroup/memory.peak")) for name in containers
             ]
             docker("stop", "-t", "4", containers[0])
-            metrics["beta_during_alpha_backend_stop"] = beta.request("GET", "/list", role="View")[0]
+            metrics["beta_during_alpha_backend_stop"] = beta.request("GET", "/list", role="View").status
             assert metrics["beta_during_alpha_backend_stop"] == (502 if shared else 200)
             started = time.monotonic()
             docker("start", containers[0])
@@ -404,20 +424,31 @@ def compare(image, count, cycles, shared, quota):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", nargs="?", help="local Photowall image containing MVP-02 and the staging package")
+    parser.add_argument("--event-url", help="HTTPS origin of a single disposable rehearsal event")
     parser.add_argument("--alpha-url", help="HTTPS origin of the disposable alpha staging event")
     parser.add_argument("--beta-url", help="HTTPS origin of the disposable beta staging event")
     parser.add_argument("--photos", type=int, default=250)
+    parser.add_argument("--guest-clients", type=int, default=25, help="concurrent upload clients per event")
     parser.add_argument("--cycles", type=int, default=10)
     parser.add_argument("--quota", action="store_true", help="upload exactly 2 GiB of media per 250-photo gallery")
     args = parser.parse_args()
     if not 1 <= args.photos <= 250 or args.cycles < 1:
         parser.error("use 1 to 250 photos per event and at least one create cycle")
+    if not 1 <= args.guest_clients <= 250:
+        parser.error("use 1 to 250 upload clients per event")
     if args.quota and args.photos != 250:
         parser.error("--quota requires 250 photos per event")
-    if args.alpha_url or args.beta_url:
-        if args.image or not (args.alpha_url and args.beta_url):
-            parser.error("provide both event URLs for a live workload")
-        origins = dict(zip(EVENTS, (args.alpha_url, args.beta_url)))
+    if args.event_url or args.alpha_url or args.beta_url:
+        if args.image or (args.event_url and (args.alpha_url or args.beta_url)):
+            parser.error("choose a local image, a single event URL, or a pair of event URLs")
+        if args.event_url:
+            origins = {"alpha": args.event_url}
+            roles = ("View", "Upload")
+        else:
+            if not (args.alpha_url and args.beta_url):
+                parser.error("provide both alpha and beta URLs for a two-event workload")
+            origins = dict(zip(EVENTS, (args.alpha_url, args.beta_url)))
+            roles = ("View", "Upload", "Admin")
         endpoints = {}
         hosts = set()
         for event, origin in origins.items():
@@ -427,24 +458,25 @@ def main():
                 parser.error("event URLs must be HTTPS origins")
             hosts.add(url.hostname)
             pins = {}
-            for role in ("View", "Upload", "Admin"):
+            for role in roles:
                 variable = f"PW_{event.upper()}_{role.upper()}_PIN"
                 pins[role] = os.environ.get(variable, "").strip()
                 if not pins[role]:
                     parser.error(f"set {variable} in the environment")
             endpoints[event] = Endpoint(origin, pins)
-        if len(hosts) != len(EVENTS) or any(
-            endpoints["alpha"].pins[role] == endpoints["beta"].pins[role] for role in ("View", "Upload", "Admin")
+        if len(origins) == 2 and (
+            len(hosts) != 2 or any(endpoints["alpha"].pins[role] == endpoints["beta"].pins[role] for role in roles)
         ):
             parser.error("staging events require distinct hostnames and distinct role PINs")
-        print(json.dumps(run_workload(endpoints, args.photos, args.quota), indent=2), flush=True)
+        metrics = run_workload(endpoints, args.photos, args.quota, args.guest_clients)
+        print(json.dumps(metrics, indent=2), flush=True)
         return
     if not args.image:
-        parser.error("provide a local image or two HTTPS staging URLs")
+        parser.error("provide a local image or HTTPS staging URLs")
     for shared in (False, True):
         layout = "shared" if shared else "per_event"
         print(f"Running {layout} layout", flush=True)
-        metrics = compare(args.image, args.photos, args.cycles, shared, args.quota)
+        metrics = compare(args.image, args.photos, args.cycles, shared, args.quota, args.guest_clients)
         print(json.dumps({layout: metrics}, indent=2), flush=True)
 
 

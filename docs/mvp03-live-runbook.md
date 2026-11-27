@@ -38,7 +38,60 @@ For each layout, set the two HTTPS origins as `PW_ALPHA_URL` and `PW_BETA_URL`. 
 
 The quota pass uploads 250 valid PNGs totaling exactly 2 GiB per event, including one 10 MiB photo. Each layout runs 25 concurrent upload clients per event, active list polls, and one ZIP per event. The first local quota rehearsal returned HTTP 500 during export with the default worker timeout. For the controlled quota comparison, set `GUNICORN_CMD_ARGS="--timeout 180"` on both layouts and allow at least 180 seconds for response headers through the gateway. Record the actual timeouts and any edge limit that interrupts the ZIP.
 
-Capture the command output, proxy status and timing logs, p50/p95 request and readiness latency, errors, ZIP response latency and bytes, peak CPU/RSS and disk usage, and billed and observed transfer. Record gateway time to first ZIP byte and wall poll delay while the worker builds the ZIP.
+Capture the command output, proxy status and timing logs, p50/p95 request and readiness latency, errors, ZIP response latency and bytes, peak CPU/RSS and disk usage, and billed and observed transfer. The harness reports `first_byte_seconds` from the client request start to the first ZIP body byte, `seconds` from request start through the full download, and archive bytes for each event. Keep the gateway logs to correlate slow browser list requests with ZIP generation.
+
+### Measure browser update delay
+
+Use a fresh disposable gallery for this check so the marker is the newest photo and the quota fixture stays unchanged. On one workstation, open separate browser windows for the wall, slideshow, and upload form. Keep the wall and default slideshow visible while you upload. Sign in with the event's viewer PIN, leave auto-refresh enabled, keep the wall scrolled to the top, and wait for the first list request on each page.
+
+Run this snippet in the DevTools console on both viewer pages. Use a new marker filename for each repeat and update the suffix to match.
+
+```javascript
+(() => {
+  const suffix = "-mvp03-probe-01.png";
+  const deadline = performance.now() + 120_000;
+
+  async function sample() {
+    const image = [...document.querySelectorAll("#grid img, #slide")].find(img =>
+      img.complete && img.naturalWidth && img.currentSrc &&
+      new URL(img.currentSrc).pathname.endsWith(suffix));
+
+    if (image) {
+      const source = image.currentSrc;
+      const decoded = await image.decode().then(() => true, () => false);
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const { top, right, bottom, left } = image.getBoundingClientRect();
+      if (decoded && image.isConnected && image.currentSrc === source &&
+          top < innerHeight && bottom > 0 && left < innerWidth && right > 0) {
+        console.log("Photo visible at epoch ms", performance.timeOrigin + performance.now());
+        return;
+      }
+    }
+
+    if (performance.now() < deadline) requestAnimationFrame(sample);
+    else console.warn("Photo did not appear within 120 seconds.");
+  }
+
+  requestAnimationFrame(sample);
+})();
+```
+
+On the upload page, run this snippet before using the normal form to upload a synthetic PNG named `mvp03-probe-01.png`. Check that the form shows success.
+
+```javascript
+(() => {
+  const observer = new PerformanceObserver(entries => {
+    const upload = entries.getEntries().find(entry =>
+      entry.initiatorType === "fetch" && new URL(entry.name).pathname === "/upload");
+    if (!upload) return;
+    observer.disconnect();
+    console.log("Upload acknowledged at epoch ms", performance.timeOrigin + upload.responseStart);
+  });
+  observer.observe({ type: "resource" });
+})();
+```
+
+Subtract the acknowledgment time from each viewer timestamp. Record the browser version, both delays and any timeout. Repeat at different points in the normal polling cycle without refreshing either viewer. During the separate quota pass, keep the wall open and use its Network panel to record list request times and failures over the ZIP build window from the gateway logs. Save timing values and status codes without exporting headers or session cookies.
 
 ## Recover from host or volume loss
 
