@@ -49,6 +49,7 @@ Environment variables read at startup:
 - `VIEW_PIN` – gates the viewer pages, photo lists, direct image URLs, and ZIP export. Enter the PIN once per browser session or use `X-View-Pin` for programmatic requests.
 - `EVENT_EXPIRES_AT` – optional viewer cutoff for a PIN-protected event, for example `2026-12-01T20:00:00Z`. Requires `VIEW_PIN` and a separate, securely generated `SECRET_KEY`. At that time, viewer pages, PIN entry, lists, photos and ZIP export return HTTP 410. File deletion is a separate operation.
 - `ALLOW_UPLOAD` – set to `1/true/on` to enable uploads; otherwise `/upload` returns HTTP 403.
+- `PHOTOWALL_DATA_DIR` – writable directory for uploads, the metadata index and temporary ZIP exports. Defaults to the application directory. Relative paths resolve from the application directory. The container uses `/data`.
 - `PHOTO_ROOT` – optional folder to *browse* instead of `uploads/` (supports absolute paths like `/mnt/n/erik/dropbox/storage/pics/`). When set, the app defaults to recursive scanning and becomes read-only by default.
 - `PHOTO_RECURSIVE` – set to `1/true/on` to scan `PHOTO_ROOT` recursively (default: `1` when `PHOTO_ROOT` is set, else `0`).
 - `PHOTO_READONLY` – set to `0/false/off` to allow deletes/uploads when `PHOTO_ROOT` points at `uploads/` (default: read-only when `PHOTO_ROOT` points elsewhere).

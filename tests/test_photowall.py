@@ -28,6 +28,7 @@ def client(tmp_path, monkeypatch):
     upload_dir.mkdir()
     metadb_path = tmp_path / "metadata_index.json"
 
+    monkeypatch.setattr(photowall, "DATA_DIR", tmp_path)
     monkeypatch.setattr(photowall, "UPLOAD_DIR", upload_dir)
     monkeypatch.setattr(photowall, "PHOTO_DIR", upload_dir)
     monkeypatch.setattr(photowall, "PHOTO_READONLY", False)
@@ -60,6 +61,21 @@ def test_home_wall_and_slideshow_render(client):
     assert client.get("/").status_code == 200
     assert client.get("/wall").status_code == 200
     assert client.get("/slideshow").status_code == 200
+
+
+def test_readiness_probes_event_storage(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
+    monkeypatch.setattr(photowall, "EVENT_EXPIRES_AT", 0)
+    ready = client.get("/readyz")
+    assert ready.status_code == 204
+    assert ready.headers["Cache-Control"] == "no-store"
+    assert list(tmp_path.iterdir()) == [photowall.UPLOAD_DIR]
+    assert list(photowall.UPLOAD_DIR.iterdir()) == []
+
+    monkeypatch.setattr(photowall, "PHOTO_DIR", tmp_path / "missing")
+    unavailable = client.get("/readyz")
+    assert unavailable.status_code == 503
+    assert unavailable.headers["Cache-Control"] == "no-store"
 
 
 def test_public_photo_keeps_immutable_cache(client):
@@ -455,6 +471,7 @@ def test_upload_file_size_boundary(upload_client, extra_bytes, status):
 
 def test_gunicorn_upload_request_size_boundary(tmp_path):
     shutil.copy2(photowall.__file__, tmp_path)
+    data_dir = tmp_path / "event-data"
     try:
         listener = socket.socket()
         with listener:
@@ -465,7 +482,12 @@ def test_gunicorn_upload_request_size_boundary(tmp_path):
             server = subprocess.Popen(
                 [sys.executable, "-m", "gunicorn", "--bind", f"fd://{fd}", "photowall:app"],
                 cwd=tmp_path, pass_fds=(fd,),
-                env={"PATH": os.defpath, "ALLOW_UPLOAD": "1", "XDG_RUNTIME_DIR": str(tmp_path)},
+                env={
+                    "PATH": os.defpath,
+                    "ALLOW_UPLOAD": "1",
+                    "PHOTOWALL_DATA_DIR": str(data_dir),
+                    "XDG_RUNTIME_DIR": str(tmp_path),
+                },
             )
     except OSError as exc:
         if exc.errno in (errno.EACCES, errno.EPERM):
@@ -511,9 +533,10 @@ def test_gunicorn_upload_request_size_boundary(tmp_path):
                 finally:
                     connection.close()
 
-        saved = list((tmp_path / "uploads").iterdir())
+        saved = list((data_dir / "uploads").iterdir())
         assert len(saved) == 2
         assert all(path.read_bytes() == photo for path in saved)
+        assert (data_dir / "metadata_index.json").is_file()
     finally:
         server.terminate()
         try:
