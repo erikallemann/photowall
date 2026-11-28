@@ -1,33 +1,35 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Upload Photos</title>
+<html lang="{{ ui_lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ t('Upload Photos') }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='upload_form.css') }}"></head>
 <body>
 <main>
   <header>
     <a class="wordmark" href="/wall">Photowall</a>
-    <nav class="actions" aria-label="Display">
-      <a href="/wall">Photo wall</a>
-      <a href="/slideshow">Slideshow</a>
+    <nav class="actions" aria-label="{{ t('Display') }}">
+      <a href="/wall">{{ t('Photo wall') }}</a>
+      <a href="/slideshow">{{ t('Slideshow') }}</a>
+      {% include 'language_toggle.html' %}
     </nav>
   </header>
-  <h1>Add a photo</h1>
+  <h1>{{ t('Add a photo') }}</h1>
   <form id="uploadForm">
-    <label>Photo
+    <label>{{ t('Photo') }}
       <input id="file" name="file" type="file" accept="image/*" aria-describedby="photo-formats" required>
-      <span id="photo-formats" class="muted">JPG, PNG, GIF or WebP · Up to 10 MB</span>
+      <span id="photo-formats" class="muted">{{ t('JPG, PNG, GIF or WebP · Up to 10 MB') }}</span>
     </label>
-    <label>Caption (optional, 40 characters)
-      <input id="caption" name="caption" maxlength="40" placeholder="e.g. Couple on stage">
+    <label>{{ t('Caption (optional, 40 characters)') }}
+      <input id="caption" name="caption" maxlength="40" placeholder="{{ t('e.g. Couple on stage') }}">
     </label>
-    <label>PIN (if required)
-      <input id="pin" type="password" maxlength="64" autocomplete="off" placeholder="Enter upload PIN">
+    <label>{{ t('PIN (if required)') }}
+      <input id="pin" type="password" maxlength="64" autocomplete="off" placeholder="{{ t('Enter upload PIN') }}">
     </label>
-    <button class="primary" type="submit">Upload photo</button>
+    <button class="primary" type="submit">{{ t('Upload photo') }}</button>
     <div id="status" role="status"></div>
   </form>
-  <a class="archive muted" href="/download">Download ZIP</a>
+  <a class="archive muted" href="/download">{{ t('Download ZIP') }}</a>
 </main>
+{% include 'ui_scripts.html' %}
 <script src="{{ url_for('static', filename='upload_form.js') }}"></script>
 </body></html>

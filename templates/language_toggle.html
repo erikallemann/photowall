@@ -1,0 +1,5 @@
+{%- set alternate = 'en' if ui_lang == 'sv' else 'sv' -%}
+{%- set destination = request.full_path if request.query_string else request.path -%}
+<form class="language-toggle" method="post" action="{{ url_for('set_language', next=destination) }}">
+  <button type="submit" name="language" value="{{ alternate }}" lang="{{ alternate }}" title="{{ t('Switch language') }}">{{ 'English' if alternate == 'en' else 'Svenska' }}</button>
+</form>

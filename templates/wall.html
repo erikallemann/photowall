@@ -1,64 +1,68 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="{{ ui_lang }}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Photo Wall</title>
+<title>{{ t('Photo Wall') }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='wall.css') }}">
 </head>
 <body{% if projector %} class="projector"{% endif %}>
 <header class="wall-header">
   {% if not projector %}
-  <nav class="wall-nav" aria-label="Main">
+  <nav class="wall-nav" aria-label="{{ t('Main') }}">
     <a class="wordmark" href="/">Photowall</a>
-    {% if can_upload %}<a class="button primary" href="/">Add photo</a>{% endif %}
+    <div class="guest-actions">
+      {% include 'language_toggle.html' %}
+      {% if can_upload %}<a class="button primary" href="/">{{ t('Add photo') }}</a>{% endif %}
+    </div>
   </nav>
   {% endif %}
   <div class="wall-heading">
     <div>
-      <h1>Photo wall</h1>
-      <p id="status" role="status">Loading photos…</p>
+      <h1>{{ t('Photo wall') }}</h1>
+      <p id="status" role="status">{{ t('Loading photos…') }}</p>
     </div>
-    <nav class="display-nav" aria-label="Display">
+    <nav class="display-nav" aria-label="{{ t('Display') }}">
       {% if projector %}
-      <a class="button" href="/wall">Guest wall</a>
-      <a class="button" href="/slideshow">Slideshow</a>
-      <button id="fullscreen" class="primary" type="button">Full screen</button>
+      <a class="button" href="/wall">{{ t('Guest wall') }}</a>
+      <a class="button" href="/slideshow">{{ t('Slideshow') }}</a>
+      <button id="fullscreen" class="primary" type="button">{{ t('Full screen') }}</button>
+      {% include 'language_toggle.html' %}
       {% else %}
-      <a class="button" href="/slideshow">Slideshow</a>
-      <a class="button" href="/wall?display=1">Big screen</a>
+      <a class="button" href="/slideshow">{{ t('Slideshow') }}</a>
+      <a class="button" href="/wall?display=1">{{ t('Big screen') }}</a>
       <details id="displayOptions">
-        <summary class="button">Options</summary>
+        <summary class="button">{{ t('Options') }}</summary>
         <div class="wall-controls">
-          <label for="sort">Sort by</label>
+          <label for="sort">{{ t('Sort by') }}</label>
           <select id="sort">
-            <option value="upload">Uploaded</option>
-            <option value="taken">Taken</option>
+            <option value="upload">{{ t('Uploaded') }}</option>
+            <option value="taken">{{ t('Taken') }}</option>
           </select>
-          <label for="order">Order</label>
+          <label for="order">{{ t('Order') }}</label>
           <select id="order">
-            <option value="desc">Newest first</option>
-            <option value="asc">Oldest first</option>
+            <option value="desc">{{ t('Newest first') }}</option>
+            <option value="asc">{{ t('Oldest first') }}</option>
           </select>
-          <label for="layout">Layout</label>
+          <label for="layout">{{ t('Layout') }}</label>
           <select id="layout">
-            <option value="columns">Masonry</option>
-            <option value="rows">Grid</option>
+            <option value="columns">{{ t('Masonry') }}</option>
+            <option value="rows">{{ t('Grid') }}</option>
           </select>
-          <label class="check"><input type="checkbox" id="uniform"> Uniform tiles</label>
+          <label class="check"><input type="checkbox" id="uniform"> {{ t('Uniform tiles') }}</label>
           <details id="folderDetails">
-            <summary>Folders</summary>
+            <summary>{{ t('Folders') }}</summary>
             <div class="folder-actions">
-              <span id="selCount">Selected: 0</span>
-              <button id="clearFolders" type="button">Clear</button>
+              <span id="selCount">{{ t('Selected: 0') }}</span>
+              <button id="clearFolders" type="button">{{ t('Clear') }}</button>
             </div>
-            <label for="folderSearch" class="visually-hidden">Filter folders</label>
-            <input id="folderSearch" type="search" placeholder="Filter folders">
-            <div class="folderlist" id="folderList" aria-label="Folder list"></div>
+            <label for="folderSearch" class="visually-hidden">{{ t('Filter folders') }}</label>
+            <input id="folderSearch" type="search" placeholder="{{ t('Filter folders') }}">
+            <div class="folderlist" id="folderList" aria-label="{{ t('Folder list') }}"></div>
           </details>
           <div class="wall-actions">
-            <button id="refresh" type="button">Refresh</button>
-            <button id="toggle" type="button" aria-pressed="true">Auto-refresh</button>
-            {% if show_download %}<a class="button" href="/download">Download ZIP</a>{% endif %}
+            <button id="refresh" type="button">{{ t('Refresh') }}</button>
+            <button id="toggle" type="button" aria-pressed="true">{{ t('Auto-refresh') }}</button>
+            {% if show_download %}<a class="button" href="/download">{{ t('Download ZIP') }}</a>{% endif %}
           </div>
         </div>
       </details>
@@ -69,16 +73,17 @@
 <main class="gallery">
   <div id="grid" class="container columns"></div>
   <div id="empty" class="empty" hidden>
-    <h2>No photos yet</h2>
-    {% if can_upload and not projector %}<a class="button primary" href="/">Add the first photo</a>{% endif %}
+    <h2>{{ t('No photos yet') }}</h2>
+    {% if can_upload and not projector %}<a class="button primary" href="/">{{ t('Add the first photo') }}</a>{% endif %}
   </div>
 </main>
-<dialog id="viewer" class="viewer" aria-label="Photo viewer">
-  <button class="vnav vprev" id="vprev" type="button" aria-label="Previous photo">‹</button>
+<dialog id="viewer" class="viewer" aria-label="{{ t('Photo viewer') }}">
+  <button class="vnav vprev" id="vprev" type="button" aria-label="{{ t('Previous photo') }}">‹</button>
   <img id="vimg" alt="">
-  <button class="vnav vnext" id="vnext" type="button" aria-label="Next photo">›</button>
-  <button class="vclose" id="vclose" type="button" aria-label="Close photo viewer" autofocus>×</button>
+  <button class="vnav vnext" id="vnext" type="button" aria-label="{{ t('Next photo') }}">›</button>
+  <button class="vclose" id="vclose" type="button" aria-label="{{ t('Close photo viewer') }}" autofocus>×</button>
   <div class="vhud"><div id="vcap"></div><div id="vcount"></div></div>
 </dialog>
+{% include 'ui_scripts.html' %}
 <script src="{{ url_for('static', filename='wall.js') }}"></script>
 </body></html>

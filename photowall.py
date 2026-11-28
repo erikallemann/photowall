@@ -15,6 +15,7 @@ Env:
 
 import os, re, json, time, secrets, struct, tempfile, zipfile
 from datetime import datetime
+from functools import cache
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, unquote
@@ -95,6 +96,40 @@ except Exception:
 
 app = Flask(__name__, static_folder=str(BASE / "static"))
 app.secret_key = (SECRET_KEY or ADMIN_PIN or UPLOAD_PIN or secrets.token_hex(16))
+UI_LANGUAGES = {"en", "sv"}
+UI_LANGUAGE_COOKIE = "pw_language"
+DEFAULT_UI_LANGUAGE = os.environ.get("PHOTOWALL_LANGUAGE", "en").strip().lower()
+if DEFAULT_UI_LANGUAGE not in UI_LANGUAGES:
+    DEFAULT_UI_LANGUAGE = "en"
+
+
+def _ui_language():
+    preference = request.cookies.get(UI_LANGUAGE_COOKIE)
+    return preference if preference in UI_LANGUAGES else DEFAULT_UI_LANGUAGE
+
+
+@cache
+def _swedish_ui():
+    return json.loads((BASE / "static" / "ui-sv.json").read_text(encoding="utf-8"))
+
+
+def _ui_catalogue(language):
+    return _swedish_ui() if language == "sv" else {}
+
+
+def _ui_text(message):
+    return _ui_catalogue(_ui_language()).get(message, message)
+
+
+@app.context_processor
+def ui_translation_context():
+    language = _ui_language()
+    strings = _ui_catalogue(language)
+    return {
+        "ui_lang": language,
+        "ui_strings": strings,
+        "t": lambda message: strings.get(message, message),
+    }
 
 # ---------- Helpers ----------
 _slug_re = re.compile(r"[^a-zA-Z0-9_.-]+")
@@ -409,6 +444,7 @@ def _list_subdirs(rel_base: str = "") -> list[str]:
 # ---------- Routes ----------
 _PRIVATE_VIEW_ENDPOINTS = {"root", "wall", "slideshow", "enter_pin", "serve_upload", "download_zip"}
 _EXPIRING_ENDPOINTS = _PRIVATE_VIEW_ENDPOINTS | {"list_dirs", "list_files"}
+_LOCALIZED_PAGES = {"root", "wall", "slideshow", "enter_pin", "admin", "download_zip"}
 
 
 @app.before_request
@@ -418,7 +454,10 @@ def enforce_event_expiry():
         and request.endpoint in _EXPIRING_ENDPOINTS
         and time.time() >= EVENT_EXPIRES_AT
     ):
-        return ("Event has expired.", 410, {"Cache-Control": "no-store"})
+        message = "Event has expired."
+        if request.endpoint in {"root", "wall", "slideshow", "enter_pin"}:
+            message = _ui_text(message)
+        return (message, 410, {"Cache-Control": "no-store"})
 
 
 @app.after_request
@@ -426,6 +465,9 @@ def prevent_private_cache(response):
     if VIEW_PIN and request.endpoint in _PRIVATE_VIEW_ENDPOINTS:
         response.headers["Cache-Control"] = "private, no-store"
         response.vary.update(("Cookie", "X-View-Pin"))
+    if request.endpoint in _LOCALIZED_PAGES:
+        response.headers["Content-Language"] = _ui_language()
+        response.vary.add("Cookie")
     return response
 
 
@@ -460,6 +502,24 @@ def _view_redirect_target(target: str) -> str:
     return "/wall"
 
 
+@app.post("/language")
+def set_language():
+    language = request.form.get("language")
+    if language not in UI_LANGUAGES:
+        abort(400)
+    response = redirect(_view_redirect_target(request.args.get("next", "")), code=303)
+    response.set_cookie(
+        UI_LANGUAGE_COOKIE,
+        language,
+        max_age=365 * 24 * 60 * 60,
+        secure=request.is_secure,
+        httponly=True,
+        samesite="Lax",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.post("/enter")
 def enter_pin():
     if not VIEW_PIN:
@@ -472,7 +532,7 @@ def enter_pin():
     if (pin or "").strip() == VIEW_PIN:
         session["view_ok"] = True
         return redirect(_view_redirect_target(request.args.get("next", "")), code=303)
-    return Response("Invalid PIN", status=403, mimetype="text/plain")
+    return Response(_ui_text("Invalid PIN"), status=403, mimetype="text/plain")
 
 @app.get("/")
 def root():
@@ -482,13 +542,13 @@ def root():
     if _uploads_enabled():
         html = render_template("upload_form.html")
     else:
-        note = f"Source: {PHOTO_DIR}"
+        note = f"{_ui_text('Source')}: {PHOTO_DIR}"
         if PHOTO_RECURSIVE:
-            note += " (recursive)"
+            note += f" ({_ui_text('recursive')})"
         if PHOTO_READONLY:
-            note += " · read-only"
+            note += f" · {_ui_text('read-only')}"
         if PHOTO_DIR.resolve() != UPLOAD_DIR.resolve():
-            note += " · ZIP download is for uploads/ only"
+            note += f" · {_ui_text('ZIP download is for uploads/ only')}"
         html = render_template(
             "upload_disabled.html",
             source_note=note,
@@ -718,11 +778,11 @@ def rescan_metadata():
     return jsonify({"rescanned": count, "cached": len(_metadb), "dir": rel_dir})
 
 OFFLINE_GALLERY_HTML = """<!doctype html>
-<html lang="en">
+<html lang="{{ ui_lang }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Photowall — Event photos</title>
+<title>{{ t('Photowall — Event photos') }}</title>
 <style>
   :root { color-scheme: dark; font-family: system-ui, sans-serif; }
   body { margin: 0; background: #151515; color: #eee; }
@@ -748,10 +808,10 @@ OFFLINE_GALLERY_HTML = """<!doctype html>
 </head>
 <body>
 <header>
-  <h1>Event photos</h1>
-  <p>{{ photos|length }} photos. Select a photo to view it. Use Left/Right to browse,
-    Space to start or pause the slideshow, and Escape to close the viewer.</p>
-  <p>Keep this file alongside the photos. Everything works offline after extracting the ZIP.</p>
+  <h1>{{ t('Event photos') }}</h1>
+  <p>{{ t('{count} photo' if photos|length == 1 else '{count} photos')|replace('{count}', photos|length) }}.
+    {{ t('Select a photo to view it. Use Left/Right to browse, Space to start or pause the slideshow, and Escape to close the viewer.') }}</p>
+  <p>{{ t('Keep this file alongside the photos. Everything works offline after extracting the ZIP.') }}</p>
 </header>
 <main>
 {% for photo in photos %}
@@ -761,21 +821,21 @@ OFFLINE_GALLERY_HTML = """<!doctype html>
     <figcaption>{{ photo.caption or photo.name }}</figcaption>
   </figure>
 {% else %}
-  <p>No photos in this export.</p>
+  <p>{{ t('No photos in this export.') }}</p>
 {% endfor %}
 </main>
-<dialog id="viewer" aria-label="Photo viewer">
+<dialog id="viewer" aria-label="{{ t('Photo viewer') }}">
   <div class="controls">
-    <button type="button" id="previous" aria-label="Previous photo">Previous</button>
-    <button type="button" id="next" aria-label="Next photo">Next</button>
-    <button type="button" id="play" aria-pressed="false">Play slideshow</button>
-    <button type="button" id="fullscreen" hidden>Full screen</button>
-    <button type="button" id="close">Close</button>
+    <button type="button" id="previous" aria-label="{{ t('Previous photo') }}">{{ t('Previous') }}</button>
+    <button type="button" id="next" aria-label="{{ t('Next photo') }}">{{ t('Next') }}</button>
+    <button type="button" id="play" aria-pressed="false">{{ t('Play slideshow') }}</button>
+    <button type="button" id="fullscreen" hidden>{{ t('Full screen') }}</button>
+    <button type="button" id="close">{{ t('Close') }}</button>
     <span id="position" aria-live="polite"></span>
   </div>
   <img id="photo" alt="" tabindex="0">
   <p id="caption"></p>
-  <a id="original">Open original photo</a>
+  <a id="original">{{ t('Open original photo') }}</a>
 </dialog>
 <script>
 (() => {
@@ -800,13 +860,13 @@ OFFLINE_GALLERY_HTML = """<!doctype html>
   function stop() {
     clearInterval(timer);
     timer = null;
-    play.textContent = 'Play slideshow';
+    play.textContent = {{ t('Play slideshow')|tojson }};
     play.setAttribute('aria-pressed', 'false');
   }
   function togglePlay() {
     if (timer !== null) { stop(); return; }
     timer = setInterval(() => show(current + 1), 5000);
-    play.textContent = 'Pause slideshow';
+    play.textContent = {{ t('Pause slideshow')|tojson }};
     play.setAttribute('aria-pressed', 'true');
   }
   links.forEach((link, index) => link.addEventListener('click', event => {
