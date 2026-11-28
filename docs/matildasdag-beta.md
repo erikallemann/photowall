@@ -4,9 +4,9 @@ The expected attendance is 60–70 people. Run the beta as one standalone Photow
 
 ## Prepare on erik.roxen.com
 
-1. Inspect the current service, reverse proxy, DNS/TLS and available disk. Record the running revision and the rollback commands before making changes. Use `origin/codex/matildasdag-ui` as the app candidate and this branch for the rehearsal tools. The UI branch starts from the merged MVP-03 app at `e6829ee`.
+1. Inspect the current service, reverse proxy, DNS/TLS and available disk. Record the running revision and the rollback commands before making changes. Use `origin/codex/matildasdag-beta` as the app candidate and this branch for the rehearsal tools. When updating an existing rehearsal instance, retain its data directory and sample photos.
 2. Start a dedicated candidate with a fresh writable `PHOTOWALL_DATA_DIR` and a loopback listener on an unused port. Use the pinned [container](../Dockerfile) or a dedicated Python 3.12 virtualenv with the [same pinned dependencies](../deploy/requirements-container.txt). Start with **one sync worker**, `PHOTO_SCAN_TTL=0` and a Gunicorn timeout of 180 seconds for the ZIP test. The generic systemd example uses multiple workers. For this event, one worker keeps the filesystem index and scan state in a single process.
-3. Set `ALLOW_UPLOAD=1` and use distinct `VIEW_PIN`, `UPLOAD_PIN`, `ADMIN_PIN` and a randomly generated `SECRET_KEY`. Keep them in the host's secret or environment file. Have the organizer agree on the guest access and export deadlines before setting `EVENT_EXPIRES_AT`. A viewer cutoff also closes ZIP access.
+3. Set `ALLOW_UPLOAD=1` and `PHOTOWALL_LANGUAGE=sv`. Guests can switch to English and their browser remembers the choice. Use distinct `VIEW_PIN`, `UPLOAD_PIN`, `ADMIN_PIN` and a randomly generated `SECRET_KEY`. Keep them in the host's secret or environment file. Have the organizer agree on the guest access and export deadlines before setting `EVENT_EXPIRES_AT`. A viewer cutoff also closes ZIP access.
 4. Route a disposable HTTPS hostname to the candidate, preserving the guest's upload PIN header. Send photo, wall, slideshow, list and ZIP requests through Flask and bypass any shared cache for protected content. If the proxy has a body cap, allow the inclusive 10,551,296-byte multipart limit. Allow at least 180 seconds for upstream response headers during the ZIP test. Check `/readyz` on the private listener before routing traffic.
 
 ## Rehearse before Thursday evening, 3 December
@@ -27,6 +27,8 @@ Record upload/list p95, any 4xx or 5xx responses, displayed-photo delay, ZIP fir
 
 On the projector, try `/slideshow` for a full-frame carousel and `/wall?display=1` for a live grid of the latest 12 uploads. Enter full screen on each and check the photos and controls at the venue's viewing distance.
 
+In a fresh browser session, verify that the candidate opens in Swedish. Switch to English and back while on `/slideshow?interval=6`. Confirm the switch keeps the interval and that the selected language follows you to the wall and upload page. With three sample photos, watch at least two loops. Then add a synthetic photo during an interval and confirm it joins at the next normal transition. Give each decoded photo about six seconds on screen. Pause and add another sample to confirm that a refresh leaves the paused photo visible.
+
 With a synthetic photo, verify private media in a fresh browser session, including direct URLs, and confirm no shared cache hit. Exercise a service restart and confirm that acknowledged photos are still present. Verify the download on the route the organizer will use. The standalone viewer PIN also grants ZIP access. A quota-size ZIP occupies the sync worker during generation, so plan the large export for after guest traffic.
 
 ### Local baseline on 27 November
@@ -43,4 +45,4 @@ On the same day, the separate 25-client quota rehearsal verified 2 GiB of origin
 
 ## Prompt for Codex CLI on the host
 
-> Fetch `origin/codex/beta-rehearsal` and `origin/codex/matildasdag-ui`. Read `docs/matildasdag-beta.md` on the rehearsal branch and use the UI branch for the candidate app. Prepare the 4 December 2026 Photowall beta for 60–70 guests at matildasdag.se. Inspect the existing proxy, service, TLS and disk first. Set up a disposable candidate with synthetic media and separate storage. Run the 4- and 70-client rehearsals. Verify phone uploads and browsing, both projector modes, protected media and ZIP export. Tune from the measurements and report the results, final deploy commands and rollback. Ask before changing the live matildasdag.se route or touching event photos.
+> Fetch `origin/codex/matildasdag-beta` and `origin/codex/beta-rehearsal`. Read `docs/matildasdag-beta.md` on the rehearsal branch. Update the existing disposable beta instance to the candidate branch, preserving its data and sample photos, and set `PHOTOWALL_LANGUAGE=sv`. Check `/slideshow?interval=6` with three photos, including a new upload during playback and while paused. Verify the English/Svenska toggle in a fresh browser. Continue any outstanding host rehearsal checks and report the deployed revision, timing, and rollback. Ask before changing the live matildasdag.se route.
