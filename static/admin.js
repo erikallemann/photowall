@@ -1,62 +1,152 @@
-const grid=document.getElementById('grid'), statusEl=document.getElementById('status');
-const pinEl=document.getElementById('pin');
-let known=new Set(), auto=true, timer=null, admin={pin: localStorage.getItem('pw_admin_pin')||''};
-let READONLY = false;
-pinEl.value = admin.pin;
+const grid = document.getElementById('grid');
+const status = document.getElementById('status');
+const actionStatus = document.getElementById('actionStatus');
+const pinInput = document.getElementById('pin');
+const autoButton = document.getElementById('toggle');
+const cards = new Map();
+const dateFormat = new Intl.DateTimeFormat(uiLanguage, {
+  dateStyle: 'medium', timeStyle: 'short',
+});
+let auto = true;
+let timer;
+let listVersion = 0;
 
-document.getElementById('save').onclick = ()=>{ admin.pin=pinEl.value||''; localStorage.setItem('pw_admin_pin', admin.pin); };
-document.getElementById('refresh').onclick = load;
-document.getElementById('toggle').onclick = ()=>{ auto=!auto; document.getElementById('toggle').textContent=text(auto?'Auto: On':'Auto: Off'); if(auto) tick(); else clearInterval(timer); };
-
-function setStatus(t){ statusEl.textContent=t; }
-
-async function fetchList(){
-  const r = await fetch('/list?limit=400', {cache:'no-store'});
-  const d = await r.json();
-  READONLY = !!d.readonly;
-  const items = (d.items||[]).sort((a,b)=> b.ts - a.ts);
-  if (READONLY){
-    setStatus(text('Read-only mode: deletes are disabled'));
+if (pinInput) {
+  const save = document.getElementById('save');
+  try {
+    pinInput.value = localStorage.getItem('pw_admin_pin') || '';
+    save.onclick = () => {
+      try {
+        localStorage.setItem('pw_admin_pin', pinInput.value.trim());
+        actionStatus.textContent = text('Admin PIN saved in this browser.');
+      } catch {
+        actionStatus.textContent = text('This browser could not save the admin PIN.');
+      }
+    };
+  } catch {
+    save.hidden = true;
   }
-  return items;
 }
 
-async function doDelete(name,card){
-  if(READONLY){ alert(text('Read-only mode: deletes are disabled')); return; }
-  if(!admin.pin){ alert(text('Enter the admin PIN first')); return; }
-  const r = await fetch('/delete',{method:'POST',
-    headers:{'Content-Type':'application/json','X-Admin-Pin': admin.pin},
-    body: JSON.stringify({name})
-  });
-  if(r.status===204){ card.remove(); known.delete(name); setStatus(text('Deleted {name}', {name})); }
-  else if(r.status===403){ alert(text('Incorrect PIN')); }
-  else if(r.status===409){ alert(text('Read-only mode: deletes are disabled')); }
-  else { alert(text('Delete failed')); }
-}
+async function removePhoto(photo, card, button) {
+  const pin = pinInput.value.trim();
+  if (!pin) {
+    actionStatus.textContent = text('Enter the admin PIN first');
+    pinInput.focus();
+    return;
+  }
+  if (!window.confirm(text('Permanently remove this photo from the event?'))) return;
 
-function render(items){
-  let added=0; const frag=document.createDocumentFragment();
-  for(const it of items){
-    if(known.has(it.name)) continue;
-    const card=document.createElement('article'); card.className='card';
-    const btn=document.createElement('button'); btn.className='del'; btn.textContent='×'; btn.title=text('Delete');
-    if (READONLY){
-      btn.disabled = true;
-      btn.title = text('Read-only mode');
-      btn.style.opacity = '0.5';
+  button.disabled = true;
+  actionStatus.textContent = text('Removing photo…');
+  try {
+    const response = await fetch('/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Pin': pin },
+      body: JSON.stringify({ name: photo.name }),
+    });
+    if (response.status === 204 || response.status === 404) {
+      cards.delete(photo.name);
+      card.remove();
+      actionStatus.textContent = text('Photo removed.');
+      load();
+    } else if (response.status === 403) {
+      actionStatus.textContent = text('Incorrect PIN');
+    } else if (response.status === 409) {
+      actionStatus.textContent = text('Read-only mode: deletes are disabled');
     } else {
-      btn.onclick=()=> doDelete(it.name, card);
+      actionStatus.textContent = text('Delete failed');
     }
-    const img=document.createElement('img'); img.loading='lazy'; img.decoding='async'; img.alt=it.name; img.src=it.url+'?v='+it.ts;
-    const meta=document.createElement('div'); meta.className='meta';
-    const ts=document.createElement('div'); ts.className='pill'; ts.textContent=new Date(it.ts).toLocaleString(uiLanguage);
-    const cap=document.createElement('div'); cap.className='muted'; cap.textContent=it.cap||'';
-    meta.append(ts,cap); card.append(btn,img,meta); frag.append(card);
-    known.add(it.name); added++;
+  } catch {
+    actionStatus.textContent = text('Delete failed');
+  } finally {
+    button.disabled = false;
   }
-  if(added) grid.prepend(frag);
-  setStatus(text(known.size === 1 ? 'Displaying {count} photo' : 'Displaying {count} photos', {count: known.size}));
 }
-async function load(){ try{ const items=await fetchList(); render(items); }catch(e){ setStatus(text('Failed to load photos')); } }
-function tick(){ clearInterval(timer); timer=setInterval(load,15000); }
-load(); tick();
+
+function makeCard(photo) {
+  const card = document.createElement('article');
+  card.className = 'card';
+  const fullImage = document.createElement('a');
+  fullImage.href = photo.url + '?v=' + photo.ts;
+  fullImage.target = '_blank';
+  fullImage.rel = 'noopener';
+  fullImage.title = text('Open original photo');
+  const image = document.createElement('img');
+  image.loading = 'lazy';
+  image.decoding = 'async';
+  image.alt = photo.cap || photo.name;
+  image.src = fullImage.href;
+  fullImage.append(image);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  if (photo.cap) {
+    const caption = document.createElement('span');
+    caption.textContent = photo.cap;
+    meta.append(caption);
+  }
+  const time = document.createElement('time');
+  time.textContent = dateFormat.format(new Date(photo.ts));
+  meta.append(time);
+  if (pinInput) {
+    const button = document.createElement('button');
+    button.className = 'del';
+    button.type = 'button';
+    button.textContent = text('Remove photo');
+    button.onclick = () => removePhoto(photo, card, button);
+    meta.append(button);
+  }
+  card.append(fullImage, meta);
+  return card;
+}
+
+function render(photos) {
+  const currentNames = new Set(photos.map(photo => photo.name));
+  for (const [name, card] of cards) {
+    if (!currentNames.has(name)) {
+      card.remove();
+      cards.delete(name);
+    }
+  }
+
+  const additions = document.createDocumentFragment();
+  for (const photo of photos) {
+    if (cards.has(photo.name)) continue;
+    const card = makeCard(photo);
+    cards.set(photo.name, card);
+    additions.append(card);
+  }
+  grid.prepend(additions);
+  status.textContent = text(photos.length === 1 ? 'Displaying {count} photo' : 'Displaying {count} photos',
+    { count: photos.length });
+}
+
+async function load() {
+  const version = ++listVersion;
+  try {
+    const response = await fetch('/list?limit=400', { cache: 'no-store' });
+    if (response.status === 403 || response.status === 410) {
+      location.reload();
+      return;
+    }
+    if (!response.ok) throw new Error('Photo list unavailable');
+    const { items } = await response.json();
+    if (version === listVersion) render(items);
+  } catch {
+    if (version === listVersion) status.textContent = text('Failed to load photos');
+  }
+}
+
+function tick() {
+  clearInterval(timer);
+  if (auto) timer = setInterval(load, 15000);
+}
+document.getElementById('refresh').onclick = load;
+autoButton.onclick = () => {
+  auto = !auto;
+  autoButton.textContent = text(auto ? 'Auto: On' : 'Auto: Off');
+  tick();
+};
+load();
+tick();

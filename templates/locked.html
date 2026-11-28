@@ -14,7 +14,7 @@
   <div class="card">
     <p class="muted"><strong>{{ t('The wall is locked.') }}</strong> {{ t('Enter the PIN to view the gallery and slideshow.') }}</p>
     {% set destination = request.full_path if request.query_string else request.path %}
-    <form method="post" action="{{ url_for('enter_pin', next=destination) if request.path in ('/wall', '/slideshow') else url_for('enter_pin') }}" autocomplete="off">
+    <form method="post" action="{{ url_for('enter_pin', next=destination) if request.path in ('/wall', '/slideshow', '/admin') else url_for('enter_pin') }}" autocomplete="off">
       <input name="pin" type="password" placeholder="{{ t('View PIN') }}" aria-label="{{ t('View PIN') }}" maxlength="128" required>
       <button class="primary" type="submit">{{ t('Enter') }}</button>
     </form>
