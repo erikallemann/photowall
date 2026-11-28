@@ -70,6 +70,7 @@ def test_home_wall_and_slideshow_render(client):
     [
         ("/wall?display=1", 'class="projector"'),
         ("/slideshow?interval=8", 'id="slide"'),
+        ("/admin", 'id="actionStatus"'),
     ],
 )
 def test_view_pin_preserves_requested_display(client, monkeypatch, path, display_markup):
@@ -81,7 +82,7 @@ def test_view_pin_preserves_requested_display(client, monkeypatch, path, display
 
     signed_in = client.post(form.group(1), data={"pin": "viewer"}, follow_redirects=True)
     assert signed_in.status_code == 200
-    assert signed_in.request.full_path == path
+    assert signed_in.request.full_path.removesuffix("?") == path
     assert display_markup in signed_in.get_data(as_text=True)
 
 
@@ -122,6 +123,28 @@ def test_language_default_and_swedish_archive(client, monkeypatch):
     assert '<html lang="sv">' in gallery
     assert "Evenemangsfoton" in gallery
     assert archive_response.vary == {"Cookie"}
+
+
+def test_moderated_photo_disappears_from_media_list_and_new_zip(client, monkeypatch):
+    monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
+    monkeypatch.setattr(photowall, "ADMIN_PIN", "moderator")
+    monkeypatch.setattr(photowall, "PHOTO_SCAN_TTL", 30)
+    _seed_image("remove.jpg")
+    _seed_image("keep.jpg")
+    client.post("/enter", data={"pin": "viewer"})
+    before = client.get("/list").get_json()["items"]
+    assert {photo["name"] for photo in before} == {"remove.jpg", "keep.jpg"}
+
+    rejected = client.post("/delete", json={"name": "remove.jpg"}, headers={"X-Admin-Pin": "viewer"})
+    assert rejected.status_code == 403
+    assert client.get("/uploads/remove.jpg").status_code == 200
+    removed = client.post("/delete", json={"name": "remove.jpg"}, headers={"X-Admin-Pin": "moderator"})
+    assert removed.status_code == 204
+
+    assert client.get("/uploads/remove.jpg").status_code == 404
+    assert [photo["name"] for photo in client.get("/list").get_json()["items"]] == ["keep.jpg"]
+    with zipfile.ZipFile(io.BytesIO(client.get("/download").get_data())) as archive:
+        assert set(archive.namelist()) == {"keep.jpg", "index.html"}
 
 
 def test_language_preference_rejects_unknown_language_and_external_redirect(client):

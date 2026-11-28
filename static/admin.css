@@ -1,9 +1,7 @@
 :root { --gap: 12px; }
 header {
-  display: flex;
+  display: grid;
   gap: 12px;
-  align-items: center;
-  justify-content: space-between;
   padding: 12px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
@@ -13,8 +11,11 @@ header {
 }
 h1 { margin: 0; font-size: 18px; }
 main { padding: 16px; }
-.admin-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-#pin { min-width: 180px; }
+.admin-nav, .admin-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.admin-nav h1 { margin-inline-end: auto; }
+#pin { width: min(100%, 14rem); }
+#status, #actionStatus { margin: 0 0 12px; }
+#actionStatus:empty { display: none; }
 .grid { column-width: 220px; column-gap: var(--gap); }
 .card {
   position: relative;
@@ -26,15 +27,12 @@ main { padding: 16px; }
   overflow: hidden;
 }
 .card img { display: block; width: 100%; height: auto; }
-.meta { padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.pill { font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.meta { padding: 8px 10px; display: grid; gap: 8px; overflow-wrap: anywhere; }
+.meta time { font-size: .75rem; color: var(--muted); }
 .del {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 44px;
-  padding: 0;
-  background: var(--surface);
+  justify-self: start;
   color: var(--error);
   border-color: var(--error);
 }
+.del:disabled { opacity: .65; cursor: progress; }
+@media (max-width: 37rem) { header { position: static; } }

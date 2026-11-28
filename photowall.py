@@ -136,7 +136,11 @@ _slug_re = re.compile(r"[^a-zA-Z0-9_.-]+")
 
 
 def _uploads_enabled() -> bool:
-    return ALLOW_UPLOAD and not PHOTO_READONLY and PHOTO_DIR.resolve() == UPLOAD_DIR.resolve()
+    return ALLOW_UPLOAD and _photo_store_writable()
+
+
+def _photo_store_writable() -> bool:
+    return not PHOTO_READONLY and PHOTO_DIR.resolve() == UPLOAD_DIR.resolve()
 
 
 def _gif_frame_count(source) -> int:
@@ -442,7 +446,7 @@ def _list_subdirs(rel_base: str = "") -> list[str]:
     return out
 
 # ---------- Routes ----------
-_PRIVATE_VIEW_ENDPOINTS = {"root", "wall", "slideshow", "enter_pin", "serve_upload", "download_zip"}
+_PRIVATE_VIEW_ENDPOINTS = {"root", "wall", "slideshow", "admin", "enter_pin", "serve_upload", "download_zip"}
 _EXPIRING_ENDPOINTS = _PRIVATE_VIEW_ENDPOINTS | {"list_dirs", "list_files"}
 _LOCALIZED_PAGES = {"root", "wall", "slideshow", "enter_pin", "admin", "download_zip"}
 
@@ -455,7 +459,7 @@ def enforce_event_expiry():
         and time.time() >= EVENT_EXPIRES_AT
     ):
         message = "Event has expired."
-        if request.endpoint in {"root", "wall", "slideshow", "enter_pin"}:
+        if request.endpoint in {"root", "wall", "slideshow", "admin", "enter_pin"}:
             message = _ui_text(message)
         return (message, 410, {"Cache-Control": "no-store"})
 
@@ -576,7 +580,10 @@ def slideshow():
 
 @app.get("/admin")
 def admin():
-    return Response(render_template("admin.html"), mimetype="text/html")
+    if not _has_view_access():
+        return Response(render_template("locked.html"), mimetype="text/html")
+    can_remove = bool(ADMIN_PIN) and _photo_store_writable()
+    return Response(render_template("admin.html", can_remove=can_remove), mimetype="text/html")
 
 @app.get("/dirs")
 def list_dirs():
@@ -746,7 +753,7 @@ def upload():
 def delete():
     if not ADMIN_PIN or request.headers.get("x-admin-pin", "") != ADMIN_PIN:
         return ("Forbidden", 403)
-    if PHOTO_READONLY or (PHOTO_DIR.resolve() != UPLOAD_DIR.resolve()):
+    if not _photo_store_writable():
         return ("Read-only mode", 409)
     data = request.get_json(force=True, silent=True) or {}
     name = (data.get("name") or "").strip()
@@ -756,6 +763,8 @@ def delete():
     if p.is_file() and p.suffix.lower() in ALLOWED:
         try:
             p.unlink()
+        except FileNotFoundError:
+            return ("Not found", 404)
         finally:
             _metadb.pop(name, None)
             _save_metadb()

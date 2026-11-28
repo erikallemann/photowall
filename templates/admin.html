@@ -6,20 +6,27 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}"></head>
 <body>
 <header>
-  <h1>{{ t('Admin') }}</h1>
-  <div class="admin-nav">
+  <nav class="admin-nav" aria-label="{{ t('Main') }}">
+    <h1>{{ t('Admin') }}</h1>
     <a href="/" class="muted">{{ t('Home') }}</a>
     <a href="/wall" class="muted">{{ t('Wall') }}</a>
-    <input id="pin" placeholder="{{ t('Admin PIN') }}" type="password">
-    <button id="save">{{ t('Save') }}</button>
-    <button id="refresh">{{ t('Refresh') }}</button>
-    <button id="toggle">{{ t('Auto: On') }}</button>
     {% include 'appearance_controls.html' %}
+  </nav>
+  <div class="admin-tools">
+    {% if can_remove %}
+    <input id="pin" placeholder="{{ t('Admin PIN') }}" aria-label="{{ t('Admin PIN') }}" type="password" autocomplete="off">
+    <button id="save" type="button">{{ t('Save PIN') }}</button>
+    {% else %}
+    <span class="muted">{{ t('Photo removal is unavailable here.') }}</span>
+    {% endif %}
+    <button id="refresh" type="button">{{ t('Refresh') }}</button>
+    <button id="toggle" type="button">{{ t('Auto: On') }}</button>
   </div>
 </header>
 <main>
-  <div id="grid" class="grid"></div>
   <p id="status" class="muted"></p>
+  <p id="actionStatus" role="status"></p>
+  <div id="grid" class="grid"></div>
 </main>
 {% include 'ui_scripts.html' %}
 <script src="{{ url_for('static', filename='admin.js') }}"></script>

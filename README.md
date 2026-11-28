@@ -9,7 +9,7 @@ Photowall is a lightweight Flask application for collecting photos during an eve
 - Projector-ready slideshow with shuffle, interval control, and keyboard shortcuts.
 - Swedish and English UI with a language choice remembered for each browser.
 - Muted light and dark themes, with a theme choice remembered for each browser.
-- Admin console for moderating and deleting individual shots.
+- Admin console at `/admin` for reviewing photos and confirming PIN-protected removal.
 - ZIP export of uploaded photos with an offline gallery and captions.
 
 ## Quick start (local)
@@ -103,7 +103,7 @@ journalctl --user -u photowall -f
 | `/` | GET | Upload page (shows a disabled notice when `ALLOW_UPLOAD` is false). |
 | `/wall` | GET | Masonry/grid gallery with auto refresh and lightbox viewer. |
 | `/slideshow` | GET | Fullscreen slideshow; supports `interval`, `shuffle`, `sort`, `order`, `hint` query params. |
-| `/admin` | GET | Moderation grid with delete buttons (needs `ADMIN_PIN` header when deleting). |
+| `/admin` | GET | Moderation grid behind the viewer PIN when configured. Removing a photo requires the admin PIN. |
 | `/upload` | POST | Multipart upload (`file`, optional `caption`); requires `UPLOAD_PIN` if set. |
 | `/delete` | POST | JSON body `{"name": "filename"}`; header `X-Admin-Pin`. |
 | `/rescan` | POST | Rebuild EXIF cache; header `X-Admin-Pin`. |
