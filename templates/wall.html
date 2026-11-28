@@ -1,7 +1,8 @@
 <!doctype html>
-<html lang="{{ ui_lang }}"><head><meta charset="utf-8">
+<html lang="{{ ui_lang }}"{% if projector %} data-default-theme="dark"{% endif %}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ t('Photo Wall') }}</title>
+<script src="{{ url_for('static', filename='theme.js') }}"></script>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='wall.css') }}">
 </head>
@@ -11,7 +12,7 @@
   <nav class="wall-nav" aria-label="{{ t('Main') }}">
     <a class="wordmark" href="/">Photowall</a>
     <div class="guest-actions">
-      {% include 'language_toggle.html' %}
+      {% include 'appearance_controls.html' %}
       {% if can_upload %}<a class="button primary" href="/">{{ t('Add photo') }}</a>{% endif %}
     </div>
   </nav>
@@ -26,7 +27,7 @@
       <a class="button" href="/wall">{{ t('Guest wall') }}</a>
       <a class="button" href="/slideshow">{{ t('Slideshow') }}</a>
       <button id="fullscreen" class="primary" type="button">{{ t('Full screen') }}</button>
-      {% include 'language_toggle.html' %}
+      {% include 'appearance_controls.html' %}
       {% else %}
       <a class="button" href="/slideshow">{{ t('Slideshow') }}</a>
       <a class="button" href="/wall?display=1">{{ t('Big screen') }}</a>
