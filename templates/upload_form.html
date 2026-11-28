@@ -14,20 +14,21 @@
       {% include 'appearance_controls.html' %}
     </nav>
   </header>
-  <h1>{{ t('Add a photo') }}</h1>
+  <h1>{{ t('Add photos') }}</h1>
   <form id="uploadForm">
-    <label>{{ t('Photo') }}
-      <input id="file" name="file" type="file" accept="image/*" aria-describedby="photo-formats" required>
-      <span id="photo-formats" class="muted">{{ t('JPG, PNG, GIF or WebP · Up to 10 MB') }}</span>
+    <label>{{ t('Photos') }}
+      <input id="file" name="file" type="file" accept="image/*" aria-describedby="photo-formats" multiple required>
+      <span id="photo-formats" class="muted">{{ t('JPG, PNG, GIF or WebP · Up to 10 MB per photo') }}</span>
     </label>
-    <label>{{ t('Caption (optional, 40 characters)') }}
+    <label>{{ t('Caption for all photos (optional, 40 characters)') }}
       <input id="caption" name="caption" maxlength="40" placeholder="{{ t('e.g. Couple on stage') }}">
     </label>
     <label>{{ t('PIN (if required)') }}
       <input id="pin" type="password" maxlength="64" autocomplete="off" placeholder="{{ t('Enter upload PIN') }}">
     </label>
-    <button class="primary" type="submit">{{ t('Upload photo') }}</button>
+    <button id="uploadSubmit" class="primary" type="submit">{{ t('Upload photos') }}</button>
     <div id="status" role="status"></div>
+    <ul id="uploadIssues" hidden></ul>
   </form>
   <a class="archive muted" href="/download">{{ t('Download ZIP') }}</a>
 </main>
