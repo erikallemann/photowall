@@ -9,12 +9,16 @@ const order = params.get('order') === 'asc' ? 'asc' : 'desc';
 const dir = (params.get('dir') || '').replace(/^\/+/, '').replace(/\\/g, '/').trim();
 const dirs = (params.get('dirs') || '').split(',').map(value => value.trim()).filter(Boolean);
 
-let interval = Math.max(1, Number(params.get('interval')) || 6);
+const requestedInterval = Number(params.get('interval'));
+let interval = Number.isFinite(requestedInterval) && requestedInterval > 0
+  ? Math.min(2_147_483, Math.max(1, requestedInterval)) : 6;
+const speedFormat = new Intl.NumberFormat(uiLanguage, { maximumFractionDigits: 3 });
 let shuffle = params.get('shuffle') === '1';
 let paused = false;
 let index = 0;
 let items = [];
 let timer;
+let pendingImage;
 let idleTimer;
 let loading = false;
 
@@ -24,16 +28,27 @@ function render() {
   empty.hidden = Boolean(photo);
   if (photo) {
     const source = photo.url + '?v=' + photo.ts;
-    if (image.getAttribute('src') !== source) image.src = source;
-    image.alt = photo.cap || 'Photo ' + (index + 1);
+    if (image.getAttribute('src') !== source) {
+      cancelAdvance();
+      image.src = source;
+      const decoding = image.decode();
+      pendingImage = decoding;
+      decoding.catch(() => {}).then(() => {
+        if (pendingImage !== decoding) return;
+        pendingImage = undefined;
+        schedule();
+      });
+    }
+    image.alt = photo.cap || text('Photo {number}', { number: index + 1 });
   } else {
     image.removeAttribute('src');
+    pendingImage = undefined;
   }
   document.getElementById('caption').textContent = photo?.cap || '';
   document.getElementById('time').textContent = photo
-    ? new Date(sort === 'taken' ? (photo.tk || photo.ts) : photo.ts).toLocaleString() : '';
+    ? new Date(sort === 'taken' ? (photo.tk || photo.ts) : photo.ts).toLocaleString(uiLanguage) : '';
   document.getElementById('count').textContent = (photo ? index + 1 : 0) + ' / ' + items.length;
-  document.getElementById('speed').textContent = interval.toFixed(0);
+  document.getElementById('speed').textContent = text('{seconds}s per photo', { seconds: speedFormat.format(interval) });
 }
 
 function show(position) {
@@ -63,36 +78,41 @@ async function refreshList() {
     }
     if (!response.ok) throw new Error('Photo list unavailable');
     const incoming = (await response.json()).items || [];
-    const current = items[index]?.name;
-    const previousNames = new Set(items.map(photo => photo.name));
-    const added = incoming.filter(photo => !previousNames.has(photo.name));
-    if (shuffle) {
-      const incomingByName = new Map(incoming.map(photo => [photo.name, photo]));
-      items = items.filter(photo => incomingByName.has(photo.name)).map(photo => incomingByName.get(photo.name));
-      const currentIndex = items.findIndex(photo => photo.name === current);
-      items.splice(currentIndex + 1, 0, ...randomOrder(added));
-    } else {
-      items = incoming;
-    }
-    const savedIndex = items.findIndex(photo => photo.name === current);
-    index = !shuffle && added.length ? 0 : Math.max(0, savedIndex);
-    empty.textContent = 'Waiting for photos…';
+    const current = items[index]?.url;
+    const previousUrls = new Set(items.map(photo => photo.url));
+    const added = incoming.filter(photo => !previousUrls.has(photo.url));
+    const incomingByUrl = new Map(incoming.map(photo => [photo.url, photo]));
+    items = items.map(photo => incomingByUrl.get(photo.url)).filter(Boolean);
+    const currentIndex = items.findIndex(photo => photo.url === current);
+    items.splice(currentIndex + 1, 0, ...(shuffle ? randomOrder(added) : added));
+    index = Math.max(0, currentIndex);
+    empty.textContent = text('Waiting for photos…');
     render();
+    if (items.length < 2) cancelAdvance();
+    else if (timer === undefined) schedule();
   } catch {
-    if (!items.length) empty.textContent = 'Could not load photos. Trying again soon.';
+    if (!items.length) empty.textContent = text('Could not load photos. Trying again soon.');
   } finally {
     loading = false;
   }
 }
 
-function schedule() {
+function cancelAdvance() {
   clearTimeout(timer);
-  if (!paused) timer = setTimeout(() => { next(); schedule(); }, interval * 1000);
+  timer = undefined;
+}
+function schedule() {
+  cancelAdvance();
+  if (paused || pendingImage || items.length < 2) return;
+  timer = setTimeout(() => {
+    timer = undefined;
+    next();
+  }, interval * 1000);
 }
 
 function togglePause() {
   paused = !paused;
-  pause.textContent = paused ? 'Play' : 'Pause';
+  pause.textContent = text(paused ? 'Play' : 'Pause');
   schedule();
 }
 function step(callback) {
@@ -117,7 +137,7 @@ pause.onclick = togglePause;
 fullscreen.hidden = !document.fullscreenEnabled;
 fullscreen.onclick = toggleFullscreen;
 document.addEventListener('fullscreenchange', () => {
-  fullscreen.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+  fullscreen.textContent = text(document.fullscreenElement ? 'Exit full screen' : 'Full screen');
   showControls();
 });
 ['pointermove', 'pointerdown', 'keydown'].forEach(action => document.addEventListener(action, showControls));
@@ -140,6 +160,6 @@ window.addEventListener('keydown', event => {
   }
 });
 render();
-refreshList().then(schedule);
+refreshList();
 setInterval(refreshList, 10000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshList(); });

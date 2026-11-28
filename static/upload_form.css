@@ -13,9 +13,9 @@ h1 {
   font: 500 clamp(2.5rem, 8vw, 4rem)/1 var(--display-font);
   letter-spacing: -.055em;
 }
-.actions { display: flex; gap: .85rem; font-size: .875rem; }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; font-size: .875rem; }
 .actions a { display: inline-flex; align-items: center; min-height: 44px; }
-form {
+#uploadForm {
   display: grid;
   gap: 1.05rem;
   padding: clamp(1rem, 4vw, 1.65rem);

@@ -7,6 +7,7 @@ Photowall is a lightweight Flask application for collecting photos during an eve
 - Mobile-friendly upload page (can be disabled without removing the UI).
 - Live photo wall with masonry or grid layout, swipe / keyboard navigation, automatic refresh, and optional uniform tiles.
 - Projector-ready slideshow with shuffle, interval control, and keyboard shortcuts.
+- Swedish and English UI with a language choice remembered for each browser.
 - Admin console for moderating and deleting individual shots.
 - ZIP export of uploaded photos with an offline gallery and captions.
 
@@ -50,6 +51,7 @@ Environment variables read at startup:
 - `EVENT_EXPIRES_AT` – optional viewer cutoff for a PIN-protected event, for example `2026-12-01T20:00:00Z`. Requires `VIEW_PIN` and a separate, securely generated `SECRET_KEY`. At that time, viewer pages, PIN entry, lists, photos and ZIP export return HTTP 410. File deletion is a separate operation.
 - `ALLOW_UPLOAD` – set to `1/true/on` to enable uploads; otherwise `/upload` returns HTTP 403.
 - `PHOTOWALL_DATA_DIR` – writable directory for uploads, the metadata index and temporary ZIP exports. Defaults to the application directory. Relative paths resolve from the application directory. The container uses `/data`.
+- `PHOTOWALL_LANGUAGE` – default UI language (`en` or `sv`, defaults to `en`). Guests can switch with **Svenska** or **English**. ZIP galleries use the language selected when downloaded.
 - `PHOTO_ROOT` – optional folder to *browse* instead of `uploads/` (supports absolute paths like `/mnt/n/erik/dropbox/storage/pics/`). When set, the app defaults to recursive scanning and becomes read-only by default.
 - `PHOTO_RECURSIVE` – set to `1/true/on` to scan `PHOTO_ROOT` recursively (default: `1` when `PHOTO_ROOT` is set, else `0`).
 - `PHOTO_READONLY` – set to `0/false/off` to allow deletes/uploads when `PHOTO_ROOT` points at `uploads/` (default: read-only when `PHOTO_ROOT` points elsewhere).

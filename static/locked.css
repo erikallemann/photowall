@@ -6,5 +6,5 @@ h1 {
 }
 .card { border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); padding: clamp(1rem, 4vw, 1.5rem); }
 p { margin: 0 0 .85rem; }
-form { display: flex; flex-wrap: wrap; gap: .55rem; }
+.card form { display: flex; flex-wrap: wrap; gap: .55rem; }
 input[name="pin"] { flex: 1; min-width: 9rem; }

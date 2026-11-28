@@ -3,7 +3,7 @@
   header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 16px;background:#0f1219;border-bottom:1px solid #1e2332;position:sticky;top:0;z-index:10}
   h1{margin:0;font-size:18px}
   main{padding:16px}
-  .admin-nav{display:flex;gap:8px;align-items:center}
+  .admin-nav{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   #pin{min-width:180px}
   .grid{column-width:220px;column-gap:var(--gap)}
   .card{position:relative;break-inside:avoid;margin:0 0 var(--gap);background:#0f1219;border:1px solid #1e2332;border-radius:12px;overflow:hidden}
