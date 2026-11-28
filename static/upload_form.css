@@ -43,4 +43,13 @@ input::file-selector-button {
 #status:empty { display: none; }
 #status.error { color: var(--error); }
 #status.ok { color: var(--accent); }
+#uploadIssues {
+  margin: -.6rem 0 0;
+  padding-inline-start: 1.2rem;
+  color: var(--error);
+  font-size: .85rem;
+  overflow-wrap: anywhere;
+}
+#uploadIssues li + li { margin-top: .3rem; }
+#uploadSubmit:disabled { opacity: .7; cursor: progress; }
 .archive { display: inline-block; margin-top: 1rem; font-size: .85rem; }
