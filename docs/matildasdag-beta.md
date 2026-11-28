@@ -4,7 +4,7 @@ The expected attendance is 60–70 people. Run the beta as one standalone Photow
 
 ## Prepare on erik.roxen.com
 
-1. Inspect the current service, reverse proxy, DNS/TLS and available disk. Record the running revision and the rollback commands before making changes. Use `origin/codex/matildasdag-theme` as the app candidate and this branch for the rehearsal tools. When updating an existing rehearsal instance, retain its data directory and sample photos.
+1. Inspect the current service, reverse proxy, DNS/TLS and available disk. Record the running revision and the rollback commands before making changes. Use `origin/codex/matildasdag-moderation` as the app candidate and this branch for the rehearsal tools. When updating an existing rehearsal instance, retain its data directory and sample photos.
 2. Start a dedicated candidate with a fresh writable `PHOTOWALL_DATA_DIR` and a loopback listener on an unused port. Use the pinned [container](../Dockerfile) or a dedicated Python 3.12 virtualenv with the [same pinned dependencies](../deploy/requirements-container.txt). Start with **one sync worker**, `PHOTO_SCAN_TTL=0` and a Gunicorn timeout of 180 seconds for the ZIP test. The generic systemd example uses multiple workers. For this event, one worker keeps the filesystem index and scan state in a single process.
 3. Set `ALLOW_UPLOAD=1` and `PHOTOWALL_LANGUAGE=sv`. Guests can switch to English and their browser remembers the choice. Use distinct `VIEW_PIN`, `UPLOAD_PIN`, `ADMIN_PIN` and a randomly generated `SECRET_KEY`. Keep them in the host's secret or environment file. Have the organizer agree on the guest access and export deadlines before setting `EVENT_EXPIRES_AT`. A viewer cutoff also closes ZIP access.
 4. Route a disposable HTTPS hostname to the candidate, preserving the guest's upload PIN header. Send photo, wall, slideshow, list and ZIP requests through Flask and bypass any shared cache for protected content. If the proxy has a body cap, allow the inclusive 10,551,296-byte multipart limit. Allow at least 180 seconds for upstream response headers during the ZIP test. Check `/readyz` on the private listener before routing traffic.
@@ -31,6 +31,10 @@ In a fresh browser session, verify that the candidate opens in Swedish. Switch t
 
 Try the sun/moon button next to the language switch. Guest pages start in warm light and projector views start in charcoal green. A browser's explicit choice applies across the live UI, including both projector views. Confirm that changing the theme while the carousel is paused leaves the same photo on screen.
 
+Select several synthetic files from a phone's photo library. Check that the form reports each upload and applies the optional shared caption. Include one invalid file and verify that the other files still appear on the wall. The per-photo size and format limits apply to each upload.
+
+Open `/admin` on the organizer's device and enter the viewer PIN to see the moderation gallery. Enter the separate admin PIN, choose **Remove photo** (**Ta bort foto**) on a synthetic image, and check both cancel and confirm. Confirm that a removed image disappears from the wall, slideshow and projector grid on their next normal polls, returns 404 at its direct URL, and stays out of a new ZIP.
+
 With a synthetic photo, verify private media in a fresh browser session, including direct URLs, and confirm no shared cache hit. Exercise a service restart and confirm that acknowledged photos are still present. Verify the download on the route the organizer will use. The standalone viewer PIN also grants ZIP access. A quota-size ZIP occupies the sync worker during generation, so plan the large export for after guest traffic.
 
 ### Local baseline on 27 November
@@ -42,9 +46,10 @@ On the same day, the separate 25-client quota rehearsal verified 2 GiB of origin
 ## Event day and rollback
 
 - Point the event hostname at the approved revision with an empty, separate event data directory. Take one synthetic smoke photo through the actual guest link, wall and slideshow, then remove it before the event. Check that the QR code opens the intended HTTPS hostname from a phone.
+- Give the organizer the direct `/admin` link and the separate admin PIN. Keep the guest QR code pointed at the guest page.
 - Keep the prior route and service revision available. On rollback, preserve the real event data directory and verify readiness before switching the route. Keep synthetic and real photos in their separate directories.
 - After guest uploads end, complete and verify the organizer's ZIP before any viewer cutoff. Apply the organizer's agreed retention schedule to all storage and backup copies.
 
 ## Prompt for Codex CLI on the host
 
-> Fetch `origin/codex/matildasdag-theme` and `origin/codex/beta-rehearsal`. Read `docs/matildasdag-beta.md` on the rehearsal branch. Update the existing disposable beta instance to the candidate branch, preserving its data and sample photos, and set `PHOTOWALL_LANGUAGE=sv`. Check `/slideshow?interval=6` with three photos, including a new upload during playback and while paused. Verify English/Svenska and the light/dark toggle in a fresh browser. Continue any outstanding host rehearsal checks and report the deployed revision, timing, and rollback. Ask before changing the live matildasdag.se route.
+> Fetch `origin/codex/matildasdag-moderation` and `origin/codex/beta-rehearsal`. Read `docs/matildasdag-beta.md` on the rehearsal branch. Update the existing disposable beta instance to the candidate branch, preserving its data and sample photos, and set `PHOTOWALL_LANGUAGE=sv`. Test a multi-photo selection from a phone and a confirmed removal of a synthetic photo from `/admin` using the separate admin PIN. Recheck the slideshow and both UI toggles. Continue any outstanding host rehearsal checks and report the deployed revision, results, and rollback. Ask before changing the live matildasdag.se route.
