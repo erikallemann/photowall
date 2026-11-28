@@ -9,6 +9,7 @@
   gap: .55rem;
 }
 .wall-nav { justify-content: space-between; min-height: 4.2rem; padding-block: .5rem; border-bottom: 1px solid var(--line); }
+.wall-nav .wordmark { white-space: nowrap; }
 .wall-nav .primary { padding-inline: .6rem; font-size: .875rem; }
 .wall-heading { position: relative; justify-content: space-between; flex-wrap: wrap; padding-block: 1.45rem 1.1rem; gap: .85rem; }
 .wall-heading h1 {
@@ -139,6 +140,7 @@ body:has(.viewer[open]) { overflow: hidden; }
 .projector:fullscreen, .projector::backdrop { background: var(--paper); }
 .projector .wall-header, .projector .gallery { width: 100%; padding-inline: clamp(.65rem, 2vw, 2rem); }
 .projector .wall-heading { padding-block: .75rem; }
+.projector .event-occasion { margin: 0 0 .45rem; }
 .projector .wall-heading h1 { font-size: clamp(1.75rem, 3.5vw, 3.6rem); }
 .projector .gallery { display: flex; flex: 1; flex-direction: column; min-height: 0; padding-bottom: .85rem; }
 .projector .container {

@@ -53,6 +53,7 @@ Environment variables read at startup:
 - `ALLOW_UPLOAD` – set to `1/true/on` to enable uploads; otherwise `/upload` returns HTTP 403.
 - `PHOTOWALL_DATA_DIR` – writable directory for uploads, the metadata index and temporary ZIP exports. Defaults to the application directory. Relative paths resolve from the application directory. The container uses `/data`.
 - `PHOTOWALL_LANGUAGE` – default UI language (`en` or `sv`, defaults to `en`). Guests can switch with **Svenska** or **English**. ZIP galleries use the language selected when downloaded.
+- `PHOTOWALL_EVENT_BRAND` – optional guest-page branding. Set to `matildasdag` for the December 4 dissertation party.
 - `PHOTO_ROOT` – optional folder to *browse* instead of `uploads/` (supports absolute paths like `/mnt/n/erik/dropbox/storage/pics/`). When set, the app defaults to recursive scanning and becomes read-only by default.
 - `PHOTO_RECURSIVE` – set to `1/true/on` to scan `PHOTO_ROOT` recursively (default: `1` when `PHOTO_ROOT` is set, else `0`).
 - `PHOTO_READONLY` – set to `0/false/off` to allow deletes/uploads when `PHOTO_ROOT` points at `uploads/` (default: read-only when `PHOTO_ROOT` points elsewhere).

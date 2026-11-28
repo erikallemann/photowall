@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="{{ ui_lang }}"{% if projector %} data-default-theme="dark"{% endif %}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ t('Photo Wall') }}</title>
+<title>{{ t('Photo Wall') }}{% if event_brand %} · {{ event_brand.name }}{% endif %}</title>
 <script src="{{ url_for('static', filename='theme.js') }}"></script>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='wall.css') }}">
@@ -10,7 +10,7 @@
 <header class="wall-header">
   {% if not projector %}
   <nav class="wall-nav" aria-label="{{ t('Main') }}">
-    <a class="wordmark" href="/">Photowall</a>
+    <a class="wordmark" href="/">{{ event_brand.name if event_brand else 'Photowall' }}</a>
     <div class="guest-actions">
       {% include 'appearance_controls.html' %}
       {% if can_upload %}<a class="button primary" href="/">{{ t('Add photos') }}</a>{% endif %}
@@ -19,7 +19,8 @@
   {% endif %}
   <div class="wall-heading">
     <div>
-      <h1>{{ t('Photo wall') }}</h1>
+      {% if projector %}{% include 'event_occasion.html' %}{% endif %}
+      <h1>{{ event_brand.name if projector and event_brand else t('Photo wall') }}</h1>
       <p id="status" role="status">{{ t('Loading photos…') }}</p>
     </div>
     <nav class="display-nav" aria-label="{{ t('Display') }}">

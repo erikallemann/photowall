@@ -79,6 +79,28 @@ button:hover, .button:hover { border-color: var(--accent); }
 .language-toggle button { white-space: nowrap; }
 .theme-toggle { display: inline-grid; place-items: center; width: 44px; padding: 0; }
 .theme-icon::before { content: var(--theme-symbol); font-size: 1.18rem; line-height: 1; }
+.event-occasion {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin: 1.2rem 0 0;
+  color: var(--muted);
+  font-size: .82rem;
+  font-weight: 650;
+}
+.event-occasion::before { content: ""; width: 1rem; height: 2px; border-radius: 2px; background: var(--focus); }
+.event-occasion + h1 { margin-top: .4rem; }
+.event-links {
+  display: grid;
+  gap: .25rem;
+  margin-top: 1rem;
+  padding-top: .85rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: .85rem;
+}
+.event-links p { margin: 0; }
 .muted { color: var(--muted); }
 .visually-hidden {
   position: absolute;

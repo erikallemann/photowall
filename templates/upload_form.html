@@ -1,19 +1,20 @@
 <!doctype html>
 <html lang="{{ ui_lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{ t('Upload Photos') }}</title>
+<title>{{ t('Upload Photos') }}{% if event_brand %} · {{ event_brand.name }}{% endif %}</title>
 <script src="{{ url_for('static', filename='theme.js') }}"></script>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='upload_form.css') }}"></head>
 <body>
 <main>
   <header>
-    <a class="wordmark" href="/wall">Photowall</a>
+    <a class="wordmark" href="/wall">{{ event_brand.name if event_brand else 'Photowall' }}</a>
     <nav class="actions" aria-label="{{ t('Display') }}">
       <a href="/wall">{{ t('Photo wall') }}</a>
       <a href="/slideshow">{{ t('Slideshow') }}</a>
       {% include 'appearance_controls.html' %}
     </nav>
   </header>
+  {% include 'event_occasion.html' %}
   <h1>{{ t('Add photos') }}</h1>
   <form id="uploadForm">
     <label>{{ t('Photos') }}
@@ -31,6 +32,7 @@
     <ul id="uploadIssues" hidden></ul>
   </form>
   <a class="archive muted" href="/download">{{ t('Download ZIP') }}</a>
+  {% include 'event_links.html' %}
 </main>
 {% include 'ui_scripts.html' %}
 <script src="{{ url_for('static', filename='upload_form.js') }}"></script>

@@ -1,15 +1,16 @@
 <!doctype html>
 <html lang="{{ ui_lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{ t('Upload Photos') }}</title>
+<title>{{ t('Upload Photos') }}{% if event_brand %} · {{ event_brand.name }}{% endif %}</title>
 <script src="{{ url_for('static', filename='theme.js') }}"></script>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='upload_disabled.css') }}"></head>
 <body>
 <main>
   <div class="guest-heading">
-    <div class="wordmark">Photowall</div>
+    <div class="wordmark">{{ event_brand.name if event_brand else 'Photowall' }}</div>
     {% include 'appearance_controls.html' %}
   </div>
+  {% include 'event_occasion.html' %}
   <h1>{{ t('Uploads are closed') }}</h1>
   <div class="note">
     <p class="muted">{{ source_note }}</p>
@@ -20,5 +21,6 @@
       {% if show_download %}<a class="button" href="/download">{{ t('Download ZIP') }}</a>{% endif %}
     </div>
   </div>
+  {% include 'event_links.html' %}
 </main>
 </body></html>

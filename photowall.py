@@ -102,6 +102,16 @@ DEFAULT_UI_LANGUAGE = os.environ.get("PHOTOWALL_LANGUAGE", "en").strip().lower()
 if DEFAULT_UI_LANGUAGE not in UI_LANGUAGES:
     DEFAULT_UI_LANGUAGE = "en"
 
+EVENT_BRAND = os.environ.get("PHOTOWALL_EVENT_BRAND", "").strip().lower()
+MATILDASDAG_BRAND = {
+    "name": "Matildas dag",
+    "date": "2026-12-04",
+    "date_labels": {"en": "4 December 2026", "sv": "4 december 2026"},
+    "profile_url": "https://liu.se/medarbetare/matho88",
+    "dissertation_url": "https://doi.org/10.3384/9789181184785",
+    "dissertation_title": "Informal Caregiving and Family Life in Heart Disease",
+}
+
 
 def _ui_language():
     preference = request.cookies.get(UI_LANGUAGE_COOKIE)
@@ -128,6 +138,7 @@ def ui_translation_context():
     return {
         "ui_lang": language,
         "ui_strings": strings,
+        "event_brand": MATILDASDAG_BRAND if EVENT_BRAND == "matildasdag" else None,
         "t": lambda message: strings.get(message, message),
     }
 

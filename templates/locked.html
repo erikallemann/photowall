@@ -1,15 +1,16 @@
 <!doctype html>
 <html lang="{{ ui_lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{ t('Photowall Locked') }}</title>
+<title>{{ t('Photowall Locked') }}{% if event_brand %} · {{ event_brand.name }}{% endif %}</title>
 <script src="{{ url_for('static', filename='theme.js') }}"></script>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='locked.css') }}"></head>
 <body>
 <main>
   <div class="guest-heading">
-    <div class="wordmark">Photowall</div>
+    <div class="wordmark">{{ event_brand.name if event_brand else 'Photowall' }}</div>
     {% include 'appearance_controls.html' %}
   </div>
+  {% include 'event_occasion.html' %}
   <h1>{{ t('Enter the view PIN') }}</h1>
   <div class="card">
     <p class="muted"><strong>{{ t('The wall is locked.') }}</strong> {{ t('Enter the PIN to view the gallery and slideshow.') }}</p>

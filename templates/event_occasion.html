@@ -1,0 +1,6 @@
+{% if event_brand %}
+<p class="event-occasion">
+  {{ t('Dissertation party') }} <span aria-hidden="true">·</span>
+  <time datetime="{{ event_brand.date }}">{{ event_brand.date_labels[ui_lang] }}</time>
+</p>
+{% endif %}

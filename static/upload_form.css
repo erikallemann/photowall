@@ -6,6 +6,7 @@ header {
   flex-wrap: wrap;
   gap: .55rem;
   min-height: 4.2rem;
+  padding-block: .5rem;
   border-bottom: 1px solid var(--line);
 }
 h1 {

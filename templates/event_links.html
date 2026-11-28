@@ -1,0 +1,6 @@
+{% if event_brand %}
+<footer class="event-links">
+  <p><a href="{{ event_brand.profile_url }}" target="_blank" rel="noopener noreferrer">{{ t('Matilda Holmbom at LiU') }}</a></p>
+  <p>{{ t('Dissertation') }} <span aria-hidden="true">·</span> <a href="{{ event_brand.dissertation_url }}" target="_blank" rel="noopener noreferrer"><cite lang="en">{{ event_brand.dissertation_title }}</cite></a></p>
+</footer>
+{% endif %}

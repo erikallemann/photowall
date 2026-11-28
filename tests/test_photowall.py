@@ -154,6 +154,39 @@ def test_language_preference_rejects_unknown_language_and_external_redirect(clie
     assert switched.headers["Location"] == "/wall"
 
 
+@pytest.mark.parametrize(
+    ("language", "occasion", "date"),
+    [
+        ("sv", "Disputationsfest", "4 december 2026"),
+        ("en", "Dissertation party", "4 December 2026"),
+    ],
+)
+def test_matildasdag_branding_on_guest_views(client, monkeypatch, language, occasion, date):
+    monkeypatch.setattr(photowall, "DEFAULT_UI_LANGUAGE", language)
+    monkeypatch.setattr(photowall, "ALLOW_UPLOAD", True)
+    monkeypatch.setattr(photowall, "EVENT_BRAND", "")
+    assert "Matildas dag" not in client.get("/").get_data(as_text=True)
+
+    monkeypatch.setattr(photowall, "EVENT_BRAND", "matildasdag")
+    landing = client.get("/").get_data(as_text=True)
+    for clue in (
+        "Matildas dag",
+        occasion,
+        date,
+        "https://liu.se/medarbetare/matho88",
+        "https://doi.org/10.3384/9789181184785",
+    ):
+        assert clue in landing
+    for path in ("/wall", "/wall?display=1", "/slideshow"):
+        assert "Matildas dag" in client.get(path).get_data(as_text=True)
+    assert "Matildas dag" not in client.get("/admin").get_data(as_text=True)
+
+    monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
+    locked = client.get("/").get_data(as_text=True)
+    assert occasion in locked
+    assert 'id="uploadForm"' not in locked
+
+
 def test_readiness_probes_event_storage(client, monkeypatch, tmp_path):
     monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
     monkeypatch.setattr(photowall, "EVENT_EXPIRES_AT", 0)
