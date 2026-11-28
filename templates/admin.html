@@ -1,22 +1,24 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Admin Photowall</title>
+<html lang="{{ ui_lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ t('Admin Photowall') }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}"></head>
 <body>
 <header>
-  <h1>Admin</h1>
+  <h1>{{ t('Admin') }}</h1>
   <div class="admin-nav">
-    <a href="/" class="muted">Home</a>
-    <a href="/wall" class="muted">Wall</a>
-    <input id="pin" placeholder="Admin PIN" type="password">
-    <button id="save">Save</button>
-    <button id="refresh">Refresh</button>
-    <button id="toggle">Auto: On</button>
+    <a href="/" class="muted">{{ t('Home') }}</a>
+    <a href="/wall" class="muted">{{ t('Wall') }}</a>
+    <input id="pin" placeholder="{{ t('Admin PIN') }}" type="password">
+    <button id="save">{{ t('Save') }}</button>
+    <button id="refresh">{{ t('Refresh') }}</button>
+    <button id="toggle">{{ t('Auto: On') }}</button>
+    {% include 'language_toggle.html' %}
   </div>
 </header>
 <main>
   <div id="grid" class="grid"></div>
   <p id="status" class="muted"></p>
 </main>
+{% include 'ui_scripts.html' %}
 <script src="{{ url_for('static', filename='admin.js') }}"></script>
 </body></html>

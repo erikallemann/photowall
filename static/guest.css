@@ -38,6 +38,10 @@ button:hover, .button:hover { border-color: var(--accent); }
 .primary:hover { background: var(--accent-hover); }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 .wordmark { font-weight: 740; letter-spacing: -.035em; text-decoration: none; }
+.guest-actions, .guest-heading { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; }
+.guest-heading { justify-content: space-between; }
+.language-toggle { margin: 0; font-size: .875rem; }
+.language-toggle button { white-space: nowrap; }
 .muted { color: var(--muted); }
 .visually-hidden {
   position: absolute;
