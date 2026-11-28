@@ -1,13 +1,14 @@
 <!doctype html>
 <html lang="{{ ui_lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ t('Photowall Locked') }}</title>
+<script src="{{ url_for('static', filename='theme.js') }}"></script>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='locked.css') }}"></head>
 <body>
 <main>
   <div class="guest-heading">
     <div class="wordmark">Photowall</div>
-    {% include 'language_toggle.html' %}
+    {% include 'appearance_controls.html' %}
   </div>
   <h1>{{ t('Enter the view PIN') }}</h1>
   <div class="card">

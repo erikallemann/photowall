@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="{{ ui_lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ t('Upload Photos') }}</title>
+<script src="{{ url_for('static', filename='theme.js') }}"></script>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='upload_form.css') }}"></head>
 <body>
@@ -10,7 +11,7 @@
     <nav class="actions" aria-label="{{ t('Display') }}">
       <a href="/wall">{{ t('Photo wall') }}</a>
       <a href="/slideshow">{{ t('Slideshow') }}</a>
-      {% include 'language_toggle.html' %}
+      {% include 'appearance_controls.html' %}
     </nav>
   </header>
   <h1>{{ t('Add a photo') }}</h1>
