@@ -1,6 +1,8 @@
 <!doctype html>
-<html lang="{{ ui_lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="{{ ui_lang }}" data-default-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ t('Admin Photowall') }}</title>
+<script src="{{ url_for('static', filename='theme.js') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}"></head>
 <body>
 <header>
@@ -12,7 +14,7 @@
     <button id="save">{{ t('Save') }}</button>
     <button id="refresh">{{ t('Refresh') }}</button>
     <button id="toggle">{{ t('Auto: On') }}</button>
-    {% include 'language_toggle.html' %}
+    {% include 'appearance_controls.html' %}
   </div>
 </header>
 <main>

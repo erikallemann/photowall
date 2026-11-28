@@ -1,7 +1,8 @@
 <!doctype html>
-<html lang="{{ ui_lang }}"><head><meta charset="utf-8">
+<html lang="{{ ui_lang }}" data-default-theme="dark"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ t('Slideshow') }}</title>
+<script src="{{ url_for('static', filename='theme.js') }}"></script>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='slideshow.css') }}">
 </head>
@@ -14,7 +15,7 @@
     <nav aria-label="{{ t('Display') }}">
       <a class="button" href="/wall">{{ t('Guest wall') }}</a>
       <a class="button" href="/wall?display=1">{{ t('Big screen wall') }}</a>
-      {% include 'language_toggle.html' %}
+      {% include 'appearance_controls.html' %}
     </nav>
   </header>
   <footer class="screen-footer overlay">

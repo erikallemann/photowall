@@ -8,6 +8,7 @@ Photowall is a lightweight Flask application for collecting photos during an eve
 - Live photo wall with masonry or grid layout, swipe / keyboard navigation, automatic refresh, and optional uniform tiles.
 - Projector-ready slideshow with shuffle, interval control, and keyboard shortcuts.
 - Swedish and English UI with a language choice remembered for each browser.
+- Muted light and dark themes, with a theme choice remembered for each browser.
 - Admin console for moderating and deleting individual shots.
 - ZIP export of uploaded photos with an offline gallery and captions.
 
