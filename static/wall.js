@@ -6,7 +6,7 @@ const status = document.getElementById('status');
 const viewer = document.getElementById('viewer');
 const viewerImage = document.getElementById('vimg');
 const fullscreen = document.getElementById('fullscreen');
-const dateFormat = new Intl.DateTimeFormat(undefined, {
+const dateFormat = new Intl.DateTimeFormat(uiLanguage, {
   month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
 });
 
@@ -108,7 +108,7 @@ async function setupFolders() {
   }
 
   function renderFolders() {
-    selected.textContent = 'Selected: ' + dirs.length;
+    selected.textContent = text('Selected: {count}', { count: dirs.length });
     const query = search.value.trim().toLowerCase();
     list.replaceChildren(...folders.filter(dir => dir.toLowerCase().includes(query)).map(dir => {
       const row = document.createElement('label');
@@ -118,7 +118,7 @@ async function setupFolders() {
       checkbox.checked = dirs.includes(dir);
       checkbox.onchange = () => {
         setFolders(checkbox.checked ? [...dirs, dir] : dirs.filter(value => value !== dir));
-        selected.textContent = 'Selected: ' + dirs.length;
+        selected.textContent = text('Selected: {count}', { count: dirs.length });
       };
       row.append(checkbox, dir);
       return row;
@@ -180,7 +180,9 @@ function render() {
     const card = cards.get(key) || createCard(photo, date);
     const button = card.firstElementChild;
     button.dataset.index = index;
-    button.setAttribute('aria-label', photo.cap ? 'Open photo: ' + photo.cap : 'Open photo ' + (index + 1));
+    button.setAttribute('aria-label', photo.cap
+      ? text('Open photo: {caption}', { caption: photo.cap })
+      : text('Open photo {number}', { number: index + 1 }));
     if (card === position) position = position.nextElementSibling;
     else grid.insertBefore(card, position);
     nextCards.set(key, card);
@@ -215,11 +217,12 @@ async function load() {
       lastList = listKey;
     }
     const count = items.length;
-    const label = (projector && count === 12 ? 'Latest ' : '') + count + (count === 1 ? ' photo' : ' photos');
+    const countLabel = projector && count === 12 ? 'Latest {count} photos' : count === 1 ? '{count} photo' : '{count} photos';
+    const label = text(countLabel, { count });
     if (status.textContent !== label) status.textContent = label;
     empty.hidden = count > 0;
   } catch {
-    if (request === latestRequest) status.textContent = 'Could not load photos.';
+    if (request === latestRequest) status.textContent = text('Could not load photos.');
   }
 }
 
@@ -227,7 +230,7 @@ function showPhoto(index) {
   currentPhoto = (index + viewing.length) % viewing.length;
   const photo = viewing[currentPhoto];
   viewerImage.src = photo.url + '?v=' + photo.ts;
-  viewerImage.alt = photo.cap || 'Photo ' + (currentPhoto + 1);
+  viewerImage.alt = photo.cap || text('Photo {number}', { number: currentPhoto + 1 });
   document.getElementById('vcap').textContent = [photo.cap, dateFormat.format(dateFor(photo))].filter(Boolean).join(' · ');
   document.getElementById('vcount').textContent = (currentPhoto + 1) + ' / ' + viewing.length;
 }

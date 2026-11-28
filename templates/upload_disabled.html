@@ -1,19 +1,22 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Upload Photos</title>
+<html lang="{{ ui_lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ t('Upload Photos') }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='upload_disabled.css') }}"></head>
 <body>
 <main>
-  <div class="wordmark">Photowall</div>
-  <h1>Uploads are closed</h1>
+  <div class="guest-heading">
+    <div class="wordmark">Photowall</div>
+    {% include 'language_toggle.html' %}
+  </div>
+  <h1>{{ t('Uploads are closed') }}</h1>
   <div class="note">
     <p class="muted">{{ source_note }}</p>
     <div class="actions">
-      <a class="button primary" href="/wall">Open the photo wall</a>
-      <a class="button" href="/slideshow">Slideshow</a>
-      <a class="button" href="/wall?display=1">Big screen wall</a>
-      {% if show_download %}<a class="button" href="/download">Download ZIP</a>{% endif %}
+      <a class="button primary" href="/wall">{{ t('Open the photo wall') }}</a>
+      <a class="button" href="/slideshow">{{ t('Slideshow') }}</a>
+      <a class="button" href="/wall?display=1">{{ t('Big screen wall') }}</a>
+      {% if show_download %}<a class="button" href="/download">{{ t('Download ZIP') }}</a>{% endif %}
     </div>
   </div>
 </main>

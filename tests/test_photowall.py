@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 import zlib
+from html import unescape
 from html.parser import HTMLParser
 from http.client import HTTPConnection
 from pathlib import Path
@@ -75,13 +76,59 @@ def test_view_pin_preserves_requested_display(client, monkeypatch, path, display
     monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
     locked = client.get(path).get_data(as_text=True)
     assert display_markup not in locked
-    form = re.search(r'<form\b[^>]*\baction="([^"]+)"', locked)
+    form = re.search(r'<form\b[^>]*\baction="(/enter[^"]*)"', locked)
     assert form
 
     signed_in = client.post(form.group(1), data={"pin": "viewer"}, follow_redirects=True)
     assert signed_in.status_code == 200
     assert signed_in.request.full_path == path
     assert display_markup in signed_in.get_data(as_text=True)
+
+
+def test_language_toggle_preserves_display_query_and_view_access(client, monkeypatch):
+    monkeypatch.setattr(photowall, "DEFAULT_UI_LANGUAGE", "en")
+    monkeypatch.setattr(photowall, "VIEW_PIN", "viewer")
+    path = "/slideshow?interval=8&shuffle=1"
+    locked = client.get(path).get_data(as_text=True)
+    form = re.search(r'<form\b[^>]*\baction="(/language[^"]*)"', locked)
+    assert form
+    switched = client.post(
+        unescape(form.group(1)), data={"language": "sv"}, follow_redirects=True
+    )
+    assert switched.request.full_path == path
+    assert switched.headers["Content-Language"] == "sv"
+    assert switched.vary == {"Cookie", "X-View-Pin"}
+    assert switched.headers["Cache-Control"] == "private, no-store"
+    assert '<html lang="sv">' in switched.get_data(as_text=True)
+    assert "Fotoväggen är låst." in switched.get_data(as_text=True)
+    assert client.get("/list").status_code == 403
+
+    client.post("/enter", data={"pin": "viewer"})
+    assert "Bildspel" in client.get(path).get_data(as_text=True)
+    changed_back = client.post("/language", query_string={"next": path}, data={"language": "en"})
+    assert changed_back.status_code == 303
+    assert changed_back.headers["Location"] == path
+    assert client.get("/list").status_code == 200
+    assert client.get(path).headers["Content-Language"] == "en"
+
+
+def test_language_default_and_swedish_archive(client, monkeypatch):
+    monkeypatch.setattr(photowall, "DEFAULT_UI_LANGUAGE", "sv")
+    assert "Uppladdningen är stängd" in client.get("/").get_data(as_text=True)
+    assert "Administration" in client.get("/admin").get_data(as_text=True)
+    archive_response = client.get("/download")
+    with zipfile.ZipFile(io.BytesIO(archive_response.get_data())) as archive:
+        gallery = archive.read("index.html").decode("utf-8")
+    assert '<html lang="sv">' in gallery
+    assert "Evenemangsfoton" in gallery
+    assert archive_response.vary == {"Cookie"}
+
+
+def test_language_preference_rejects_unknown_language_and_external_redirect(client):
+    assert client.post("/language", data={"language": "other"}).status_code == 400
+    switched = client.post("/language?next=//external.example", data={"language": "sv"})
+    assert switched.status_code == 303
+    assert switched.headers["Location"] == "/wall"
 
 
 def test_readiness_probes_event_storage(client, monkeypatch, tmp_path):
