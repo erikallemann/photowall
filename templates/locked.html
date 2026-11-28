@@ -1,18 +1,21 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Photowall Locked</title>
+<html lang="{{ ui_lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ t('Photowall Locked') }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='guest.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='locked.css') }}"></head>
 <body>
 <main>
-  <div class="wordmark">Photowall</div>
-  <h1>Enter the view PIN</h1>
+  <div class="guest-heading">
+    <div class="wordmark">Photowall</div>
+    {% include 'language_toggle.html' %}
+  </div>
+  <h1>{{ t('Enter the view PIN') }}</h1>
   <div class="card">
-    <p class="muted"><strong>The wall is locked.</strong> Enter the PIN to view the gallery and slideshow.</p>
+    <p class="muted"><strong>{{ t('The wall is locked.') }}</strong> {{ t('Enter the PIN to view the gallery and slideshow.') }}</p>
     {% set destination = request.full_path if request.query_string else request.path %}
     <form method="post" action="{{ url_for('enter_pin', next=destination) if request.path in ('/wall', '/slideshow') else url_for('enter_pin') }}" autocomplete="off">
-      <input name="pin" type="password" placeholder="View PIN" aria-label="View PIN" maxlength="128" required>
-      <button class="primary" type="submit">Enter</button>
+      <input name="pin" type="password" placeholder="{{ t('View PIN') }}" aria-label="{{ t('View PIN') }}" maxlength="128" required>
+      <button class="primary" type="submit">{{ t('Enter') }}</button>
     </form>
   </div>
 </main>
